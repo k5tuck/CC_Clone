@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  agent:
+    build: .
+    container_name: local-agent-v5
+    volumes:
+      - ./:/app
+    environment:
+      - AGENT_HOME=/app/.local-agent
+      - LLM_ENDPOINT=http://host.docker.internal:11434
+    tty: true
