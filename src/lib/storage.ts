@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import matter from 'gray-matter';
+import * as matter from 'gray-matter';
 
 const HOME = process.env.AGENT_HOME || (process.env.HOME || os.homedir()) + '/.local-agent';
 const AGENTS_DIR = path.resolve(HOME, 'agents');

@@ -1,35 +1,67 @@
 {
-  "name": "local-agent-ts-v5",
-  "version": "0.5.0",
-  "description": "Local Claude-Code-like agent framework v5: interactive TUI, RBAC, file pre-hook, plugin signing.",
+  "name": "cc-clone-multi-agent",
+  "version": "1.0.0",
+  "description": "Claude Code Clone with Multi-Agent Orchestration and Ollama Integration",
   "main": "dist/index.js",
   "bin": {
-    "local-agent": "dist/cli.js"
+    "local-agent": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "ts-node-dev --respawn --transpile-only src/cli.ts",
-    "start": "node dist/cli.js",
+    "build": "tsc",
+    "dev": "ts-node-dev --respawn --loader ts-node/esm src/server.ts",
     "cli": "ts-node src/cli.ts",
-    "tui": "ts-node src/tui.ts"
+    "tui": "ts-node src/tui.tsx",
+    "start": "node dist/cli.js",
+    "start:server": "node dist/server.js",
+    "start:tui": "node dist/tui.js",
+    "test": "jest",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "clean": "rm -rf dist",
+    "prepare": "npm run build"
   },
+  "keywords": [
+    "ai",
+    "llm",
+    "agent",
+    "multi-agent",
+    "ollama",
+    "code-assistant",
+    "automation"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
   "dependencies": {
+    "axios": "^1.6.0",
+    "chalk": "^4.1.2",
+    "commander": "^11.1.0",
+    "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "dotenv": "^16.1.4",
-    "node-fetch": "^2.6.7",
-    "pino": "^8.8.0",
     "gray-matter": "^4.0.3",
-    "marked": "^8.0.0",
-    "ink": "^4.0.0",
-    "react": "^18.2.0",
-    "inquirer": "^9.2.7",
-    "crypto": "^1.0.1"
+    "ink": "^3.2.0",
+    "ink-select-input": "^4.2.1",
+    "inquirer": "^8.2.5",
+    "ora": "^5.4.1",
+    "react": "^17.0.2"
   },
   "devDependencies": {
-    "@types/node": "^20.5.1",
-    "@types/inquirer": "^9.0.3",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/inquirer": "^9.0.7",
+    "@types/jest": "^29.5.10",
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.1.0",
+    "ts-jest": "^29.1.1",
     "ts-node": "^10.9.1",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

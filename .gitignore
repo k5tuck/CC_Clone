@@ -1,0 +1,10 @@
+.DS_Store
+.env
+*.d.*
+
+dist
+node_modules
+.local-agent
+
+**/agent-registry.json
+package-lock.json

@@ -35,7 +35,7 @@ export async function isTrusted(dir:string){
 
 export async function removeTrusted(dir:string){
   const dirs = await listTrusted();
-  const n = dirs.filter(d=>d!==dir);
+  const n = dirs.filter((d: string) => d !== dir);
   await fs.writeFile(TRUST, JSON.stringify({ dirs: n }, null, 2), 'utf-8');
   return n;
 }
