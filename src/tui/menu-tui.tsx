@@ -2,8 +2,8 @@
 import React, { useState } from 'react';
 import { render, Box, Text } from 'ink';
 import SelectInput from 'ink-select-input';
-import { MultiAgentOrchestrator, TaskRequest } from './lib/orchestrator/multi-agent-orchestrator';
-import { ConversationStore } from './lib/persistence/conversation-store';
+import { MultiAgentOrchestrator, TaskRequest } from '../lib/orchestrator/multi-agent-orchestrator';
+import { ConversationStore } from '../lib/persistence/conversation-store';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
