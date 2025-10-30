@@ -5,28 +5,36 @@ import { ConversationHistoryManager, Message } from '../../lib/history/Conversat
 
 export type IntentType = 'task' | 'query' | 'command';
 
-export interface Intent {
+export interface BaseIntent {
   type: IntentType;
   data: any;
 }
 
-export interface TaskIntent {
+export interface TaskIntent extends BaseIntent {
   type: 'task';
-  description: string;
-  domain: string;
-  requiredAgents: string[];
+  data: {
+    description: string;
+    domain: string;
+    requiredAgents: string[];
+  };
 }
 
-export interface QueryIntent {
+export interface QueryIntent extends BaseIntent {
   type: 'query';
-  question: string;
+  data: {
+    question: string;
+  };
 }
 
-export interface CommandIntent {
+export interface CommandIntent extends BaseIntent {
   type: 'command';
-  command: string;
-  args: string[];
+  data: {
+    command: string;
+    args: string[];
+  };
 }
+
+export type Intent = TaskIntent | QueryIntent | CommandIntent;
 
 export class OrchestratorBridge {
   constructor(
@@ -163,9 +171,9 @@ export class OrchestratorBridge {
 
     try {
       const taskRequest: TaskRequest = {
-        description: intent.description,
-        domain: intent.domain,
-        requiredAgents: intent.requiredAgents,
+        description: intent.data.description,
+        domain: intent.data.domain,
+        requiredAgents: intent.data.requiredAgents,
         autoExecute: false,
         parallel: false,
       };
@@ -202,7 +210,7 @@ export class OrchestratorBridge {
       await this.historyManager.saveMessage(conversationId, {
         role: 'assistant',
         content: errorMsg,
-        metadata: { error: true },
+        metadata: { error: new Error(error.message) },
       });
     }
   }
@@ -247,7 +255,7 @@ export class OrchestratorBridge {
     conversationId: string,
     intent: CommandIntent
   ): AsyncGenerator<StreamEvent> {
-    const { command, args } = intent;
+    const { command, args } = intent.data;
 
     switch (command.toLowerCase()) {
       case 'help':

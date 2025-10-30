@@ -5,6 +5,7 @@ import SelectInput from 'ink-select-input';
 import { MultiAgentOrchestrator, TaskRequest } from '../lib/orchestrator/multi-agent-orchestrator';
 import { ConversationStore } from '../lib/persistence/conversation-store';
 import * as dotenv from 'dotenv';
+import { Agent } from 'http';
 
 dotenv.config();
 
@@ -202,7 +203,7 @@ const App: React.FC = () => {
       }
 
       const agentList = agents
-        .map(a => `  • ${a.agentId} [${a.status}] - ${a.task}`)
+        .map((a: any) => `  • ${a.agentId} [${a.status}] - ${a.task}`)
         .join('\n');
 
       setState(prev => ({ 
@@ -229,7 +230,7 @@ const App: React.FC = () => {
       }
 
       const convList = conversations
-        .map(c => `  • ${c.id} - ${c.agentName} (${c.turnCount} turns)`)
+        .map((c: any) => `  • ${c.id} - ${c.agentName} (${c.turnCount} turns)`)
         .join('\n');
 
       setState(prev => ({ 

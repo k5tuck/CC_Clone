@@ -1,5 +1,3 @@
-// import fetch from 'node-fetch';
-
 export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -25,96 +23,97 @@ export class StreamingClient {
   ) {}
 
   async *stream(
-    messages: Message[],
-    options: StreamOptions = {}
-  ): AsyncGenerator<StreamEvent> {
-    try {
-      const response = await fetch(`${this.endpoint}/api/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+  messages: Message[],
+  options: StreamOptions = {}
+): AsyncGenerator<StreamEvent> {
+  try {
+    const url = this.endpoint + '/api/chat';
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: this.model,
+        messages,
+        stream: true,
+        options: {
+          temperature: options.temperature ?? 0.7,
+          top_p: options.topP ?? 0.9,
+          num_predict: options.maxTokens ?? -1,
         },
-        body: JSON.stringify({
-          model: this.model,
-          messages,
-          stream: true,
-          options: {
-            temperature: options.temperature ?? 0.7,
-            top_p: options.topP ?? 0.9,
-            num_predict: options.maxTokens ?? -1,
-          },
-        }),
-      });
+      }),
+    });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      if (!response.body) {
-        throw new Error('Response body is null');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        
-        // Keep the last incomplete line in buffer
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-
-          try {
-            const data = JSON.parse(line);
-            
-            // Yield token
-            if (data.message?.content) {
-              yield { 
-                type: 'token', 
-                data: data.message.content 
-              };
-            }
-
-            // Check for completion
-            if (data.done) {
-              yield { 
-                type: 'done', 
-                final: data.message?.content || '' 
-              };
-            }
-          } catch (parseError) {
-            console.warn('Failed to parse line:', line, parseError);
-          }
-        }
-      }
-    } catch (error) {
-      yield { 
-        type: 'error', 
-        error: error instanceof Error ? error : new Error(String(error))
-      };
+    if (!response.ok) {
+      throw new Error('HTTP error: ' + response.status);
     }
+
+    if (!response.body) {
+      throw new Error('Response body is null');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const result = await reader.read();
+      
+      if (result.done) {
+        break;
+      }
+
+      const chunk = decoder.decode(result.value, { stream: true });
+      
+      buffer = buffer + chunk;
+      const lines = buffer.split('\n');
+      
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+
+        try {
+          const data = JSON.parse(line);
+          
+          if (data.message && data.message.content) {
+            yield { 
+              type: 'token', 
+              data: data.message.content 
+            };
+          }
+
+          if (data.done) {
+            yield { 
+              type: 'done', 
+              final: '' 
+            };
+          }
+        } catch (parseError) {
+        }
+      }
+    }
+    
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    yield { 
+      type: 'error', 
+      error: err
+    };
   }
+}
 
   async healthCheck(): Promise<{ healthy: boolean; error?: string }> {
     try {
-      const response = await fetch(`${this.endpoint}/api/tags`, {
-        method: 'GET',
-      });
+      const url = this.endpoint + '/api/tags';
+      const response = await fetch(url);
 
       if (!response.ok) {
         return { 
           healthy: false, 
-          error: `HTTP ${response.status}: ${response.statusText}` 
+          error: 'HTTP error: ' + response.status
         };
       }
 

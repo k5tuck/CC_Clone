@@ -32,7 +32,7 @@ const Spinner: React.FC<{ label?: string }> = ({ label }) => {
 
   return (
     <Text color="yellow">
-      {frames[frame]} {label}
+      {frames[frame]} {label || 'Loading...'}
     </Text>
   );
 };
@@ -52,10 +52,11 @@ const ConversationalTUI: React.FC = () => {
   const streamingClientRef = useRef<StreamingClient | null>(null);
   const historyManagerRef = useRef<ConversationHistoryManager | null>(null);
   const bufferRef = useRef<ResponseBuffer | null>(null);
-  const inputRef = useRef<string>('');
 
   // Initialize system
   useEffect(() => {
+    let mounted = true;
+
     const init = async () => {
       try {
         const endpoint = process.env.OLLAMA_ENDPOINT || 'http://localhost:11434';
@@ -67,72 +68,73 @@ const ConversationalTUI: React.FC = () => {
 
         await historyManagerRef.current.initialize();
 
-        // Create initial conversation
         const conversationId = await historyManagerRef.current.createConversation(
           `Chat ${new Date().toLocaleString()}`
         );
 
-        // Add system message
         await historyManagerRef.current.saveMessage(conversationId, {
           role: 'system',
           content: 'You are a helpful AI assistant with access to a multi-agent system. Answer questions concisely and accurately.',
         });
 
-        setState(prev => ({
-          ...prev,
-          conversationId,
-          status: 'Ready',
-          initialized: true,
-          error: null,
-        }));
+        const messages = await historyManagerRef.current.getHistory(conversationId);
+
+        if (mounted) {
+          setState(prev => ({
+            ...prev,
+            conversationId,
+            messages,
+            status: 'Ready',
+            initialized: true,
+            error: null,
+          }));
+        }
       } catch (error: any) {
-        setState(prev => ({
-          ...prev,
-          error: `Initialization failed: ${error.message}`,
-          status: 'Error',
-        }));
+        if (mounted) {
+          setState(prev => ({
+            ...prev,
+            error: `Initialization failed: ${error.message}`,
+            status: 'Error',
+          }));
+        }
       }
     };
 
     init();
 
     return () => {
+      mounted = false;
       historyManagerRef.current?.close();
       bufferRef.current?.dispose();
     };
   }, []);
 
-  // Load messages when conversation changes
-  useEffect(() => {
-    if (state.conversationId && historyManagerRef.current) {
-      historyManagerRef.current.getHistory(state.conversationId).then(messages => {
-        setState(prev => ({ ...prev, messages }));
-      });
-    }
-  }, [state.conversationId]);
-
   const handleSubmit = async () => {
-    if (!inputRef.current.trim() || !state.conversationId) return;
+    if (!state.currentInput.trim() || !state.conversationId) return;
     if (!streamingClientRef.current || !historyManagerRef.current || !bufferRef.current) return;
 
-    const userMessage = inputRef.current.trim();
-    inputRef.current = '';
+    const userMessage = state.currentInput.trim();
     
-    setState(prev => ({ ...prev, currentInput: '', isStreaming: true, streamingContent: '' }));
+    setState(prev => ({ 
+      ...prev, 
+      currentInput: '', 
+      isStreaming: true, 
+      streamingContent: '' 
+    }));
 
     try {
       // Save user message
-      await historyManagerRef.current!.saveMessage(state.conversationId!, {
+      await historyManagerRef.current.saveMessage(state.conversationId, {
         role: 'user',
         content: userMessage,
       });
 
       // Reload messages
-      const updatedMessages = await historyManagerRef.current!.getHistory(state.conversationId!);
+      const updatedMessages = await historyManagerRef.current.getHistory(state.conversationId);
       setState(prev => ({ ...prev, messages: updatedMessages }));
 
       // Get context for LLM
-      const context = await historyManagerRef.current!.getContext(state.conversationId!);
+      const context = await historyManagerRef.current.getContext(state.conversationId);
       const llmMessages: StreamMessage[] = context.map(m => ({
         role: m.role as 'user' | 'assistant' | 'system',
         content: m.content,
@@ -140,7 +142,7 @@ const ConversationalTUI: React.FC = () => {
 
       // Stream response
       let fullResponse = '';
-      const buffer = bufferRef.current!;
+      const buffer = bufferRef.current;
 
       const unsubscribe = buffer.onFlush((text) => {
         fullResponse += text;
@@ -150,21 +152,19 @@ const ConversationalTUI: React.FC = () => {
         }));
       });
 
-      for await (const event of streamingClientRef.current!.stream(llmMessages)) {
+      for await (const event of streamingClientRef.current.stream(llmMessages)) {
         if (event.type === 'token') {
           buffer.append(event.data);
         } else if (event.type === 'done') {
           buffer.flush();
           unsubscribe();
           
-          // Save assistant message
-          await historyManagerRef.current!.saveMessage(state.conversationId!, {
+          await historyManagerRef.current.saveMessage(state.conversationId, {
             role: 'assistant',
             content: fullResponse,
           });
 
-          // Reload messages
-          const finalMessages = await historyManagerRef.current!.getHistory(state.conversationId!);
+          const finalMessages = await historyManagerRef.current.getHistory(state.conversationId);
           setState(prev => ({ 
             ...prev, 
             messages: finalMessages, 
@@ -196,11 +196,15 @@ const ConversationalTUI: React.FC = () => {
     if (key.return) {
       handleSubmit();
     } else if (key.backspace || key.delete) {
-      inputRef.current = inputRef.current.slice(0, -1);
-      setState(prev => ({ ...prev, currentInput: inputRef.current }));
+      setState(prev => ({ 
+        ...prev, 
+        currentInput: prev.currentInput.slice(0, -1) 
+      }));
     } else if (input && !key.ctrl && !key.meta) {
-      inputRef.current += input;
-      setState(prev => ({ ...prev, currentInput: inputRef.current }));
+      setState(prev => ({ 
+        ...prev, 
+        currentInput: prev.currentInput + input 
+      }));
     }
   });
 
@@ -234,40 +238,44 @@ const ConversationalTUI: React.FC = () => {
         </Box>
       )}
 
-      {/* Chat History - Scrollable area */}
-      <Box flexDirection="column" marginBottom={1}>
-        {state.messages
-          .filter(m => m.role !== 'system')
-          .slice(-15) // Show last 15 messages
-          .map((msg, idx) => (
-            <Box key={idx} marginBottom={1} flexDirection="column">
-              <Box>
-                <Text color={msg.role === 'user' ? 'cyan' : 'white'}>
-                  {getMessageIcon(msg.role)} {msg.role}
-                </Text>
-                <Text color="gray" dimColor> • {msg.timestamp.toLocaleTimeString()}</Text>
+      {/* Chat History */}
+      {state.messages.length > 0 && (
+        <Box flexDirection="column" marginBottom={1}>
+          {state.messages
+            .filter(m => m.role !== 'system')
+            .slice(-15)
+            .map((msg, idx) => (
+              <Box key={idx} marginBottom={1} flexDirection="column">
+                <Box>
+                  <Text color={msg.role === 'user' ? 'cyan' : 'white'}>
+                    {getMessageIcon(msg.role)} {msg.role}
+                  </Text>
+                </Box>
+                <Text>{msg.content || ' '}</Text>
               </Box>
-              <Text>{msg.content}</Text>
-            </Box>
-          ))}
+            ))}
+        </Box>
+      )}
 
-        {/* Streaming message */}
-        {state.isStreaming && (
-          <Box marginBottom={1} flexDirection="column">
-            <Box>
-              <Text color="white">🤖 assistant</Text>
-              <Text color="gray" dimColor> • streaming...</Text>
-            </Box>
-            <Text>{state.streamingContent}<Text color="cyan">▊</Text></Text>
+      {/* Streaming message */}
+      {state.isStreaming && (
+        <Box marginBottom={1} flexDirection="column">
+          <Box>
+            <Text color="white">🤖 assistant</Text>
+            <Text color="gray" dimColor> • streaming...</Text>
           </Box>
-        )}
-      </Box>
+          <Text>
+            {state.streamingContent || ' '}
+            <Text color="cyan">▊</Text>
+          </Text>
+        </Box>
+      )}
 
       {/* Input Area */}
       {state.initialized && !state.isStreaming && (
         <Box borderStyle="single" borderColor="cyan" paddingX={1}>
           <Text color="cyan">💬 </Text>
-          <Text>{state.currentInput}</Text>
+          <Text>{state.currentInput || ' '}</Text>
           <Text color="cyan">▊</Text>
         </Box>
       )}

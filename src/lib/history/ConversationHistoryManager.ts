@@ -128,34 +128,36 @@ export class ConversationHistoryManager {
     return messages;
   }
 
-  async getContext(conversationId: string, maxTokens: number = 8000): Promise<Message[]> {
-    const history = await this.getHistory(conversationId);
-    
-    // Simple token estimation: ~4 chars per token
-    let tokenCount = 0;
-    const contextMessages: Message[] = [];
-    
-    // Always include system message if present
-    const systemMsg = history.find(m => m.role === 'system');
-    if (systemMsg) {
-      contextMessages.push(systemMsg);
-      tokenCount += Math.ceil(systemMsg.content.length / 4);
-    }
-    
-    // Add recent messages until token limit
-    for (let i = history.length - 1; i >= 0; i--) {
-      const msg = history[i];
-      if (msg.role === 'system') continue;
-      
-      const msgTokens = Math.ceil(msg.content.length / 4);
-      if (tokenCount + msgTokens > maxTokens) break;
-      
-      contextMessages.unshift(msg);
-      tokenCount += msgTokens;
-    }
-    
-    return contextMessages;
+ async getContext(conversationId: string, maxTokens: number = 8000): Promise<Message[]> {
+  const history = await this.getHistory(conversationId);
+  
+  // Simple token estimation: ~4 chars per token
+  let tokenCount = 0;
+  const contextMessages: Message[] = [];
+  
+  // Always include system message if present
+  const systemMsg = history.find(m => m.role === 'system');
+  if (systemMsg) {
+    contextMessages.push(systemMsg);
+    tokenCount += Math.ceil(systemMsg.content.length / 4);
   }
+  
+  // Add recent messages until token limit (excluding system messages)
+  const nonSystemMessages: Message[] = [];
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msg = history[i];
+    if (msg.role === 'system') continue;
+    
+    const msgTokens = Math.ceil(msg.content.length / 4);
+    if (tokenCount + msgTokens > maxTokens) break;
+    
+    nonSystemMessages.unshift(msg); // Add to beginning to maintain chronological order
+    tokenCount += msgTokens;
+  }
+  
+  // Return: system message first, then conversation in chronological order
+  return [...contextMessages, ...nonSystemMessages];
+}
 
   async deleteConversation(conversationId: string): Promise<void> {
     this.conversations.delete(conversationId);
