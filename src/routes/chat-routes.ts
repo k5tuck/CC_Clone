@@ -35,7 +35,7 @@ class ChatSessionManager {
 
   async createSession(sessionId: string, systemPrompt?: string): Promise<Agent> {
     // Build enhanced system prompt
-    const basePrompt = systemPrompt || `You are CC_Clone, a helpful AI coding assistant with access to powerful tools.
+    const basePrompt = systemPrompt || `You are Selek, a helpful AI coding assistant with access to powerful tools.
 
 You can:
 - Read and write files

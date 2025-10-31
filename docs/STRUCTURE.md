@@ -3,7 +3,7 @@
 ## Current File Organization
 
 ```
-CC_Clone/
+Selek/
 ├── src/
 │   ├── lib/
 │   │   ├── llm/

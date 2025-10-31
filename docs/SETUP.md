@@ -1,4 +1,4 @@
-# CC_Clone Conversational TUI - Setup Guide
+# Selek Conversational TUI - Setup Guide
 
 ## 🚀 Quick Start
 
@@ -10,8 +10,8 @@
 ### 1. Install Dependencies
 
 ```bash
-# Navigate to your CC_Clone directory
-cd CC_Clone
+# Navigate to your Selek directory
+cd Selek
 
 # Install new dependencies
 pnpm install ink ink-text-input ink-spinner ink-box chalk better-sqlite3 uuid node-fetch
@@ -338,7 +338,7 @@ pnpm migrate:conversations
 
 ## 🆘 Support
 
-- **GitHub Issues:** https://github.com/k5tuck/CC_Clone/issues
+- **GitHub Issues:** https://github.com/k5tuck/Selek/issues
 - **Documentation:** See README.md and Claude.md
 - **Discussions:** GitHub Discussions tab
 

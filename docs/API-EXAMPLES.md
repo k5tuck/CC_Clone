@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Chat API provides interactive, stateful conversations with the CC_Clone agent. Each session maintains context, tool usage history, and can leverage both local tools and MCP servers.
+The Chat API provides interactive, stateful conversations with the Selek agent. Each session maintains context, tool usage history, and can leverage both local tools and MCP servers.
 
 ## Base URL
 
@@ -339,7 +339,7 @@ curl -X POST http://localhost:3000/api/chat/sessions/db-ops/messages \
 **Max Iterations Exceeded (500):**
 ```json
 {
-  "error": "Agent CC_Clone_Chat exceeded maximum iterations (15)",
+  "error": "Agent Selek_Chat exceeded maximum iterations (15)",
   "errorType": "MaxIterationsExceededError",
   "sessionId": "my-session"
 }

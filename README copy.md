@@ -1,4 +1,4 @@
-# CC_Clone - Multi-Agent Code Assistant with Ollama
+# Selek - Multi-Agent Code Assistant with Ollama
 
 A powerful TypeScript-based multi-agent orchestration system that uses local LLMs (via Ollama) to plan and execute complex coding tasks.
 
@@ -47,8 +47,8 @@ ollama pull mistral:latest       # Fast and capable
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/k5tuck/CC_Clone.git
-cd CC_Clone
+git clone https://github.com/k5tuck/Selek.git
+cd Selek
 ```
 
 ### 2. Install Dependencies
@@ -172,7 +172,7 @@ pnpm cli search "API"
 ## 📁 Project Structure
 
 ```
-CC_Clone/
+Selek/
 ├── src/
 │   ├── lib/
 │   │   ├── llm/
@@ -409,9 +409,9 @@ MIT License - see LICENSE file for details
 
 ## 🆘 Support
 
-- **Issues**: https://github.com/k5tuck/CC_Clone/issues
-- **Discussions**: https://github.com/k5tuck/CC_Clone/discussions
+- **Issues**: https://github.com/k5tuck/Selek/issues
+- **Discussions**: https://github.com/k5tuck/Selek/discussions
 
 ---
 
-**Made with ❤️ by the CC_Clone team**
+**Made with ❤️ by the Selek team**

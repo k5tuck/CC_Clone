@@ -1,10 +1,10 @@
 {
-  "name": "cc-clone-multi-agent",
-  "version": "1.0.0",
-  "description": "Claude Code Clone with Multi-Agent Orchestration and Ollama Integration",
+  "name": "selek",
+  "version": "2.0.0",
+  "description": "Selek - Systematic Multi-Agent AI Platform with Local LLM Integration",
   "main": "dist/index.js",
   "bin": {
-    "local-agent": "./dist/cli.js"
+    "selek": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",

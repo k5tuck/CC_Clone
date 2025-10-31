@@ -1,4 +1,4 @@
-# 🚀 CC_Clone Implementation Checklist
+# 🚀 Selek Implementation Checklist
 
 ## 📋 Implementation Status Tracker
 
@@ -386,7 +386,7 @@ Use this checklist to track your progress implementing the OpenCode-inspired fea
   // Look for plugins in:
   // - ~/.cc_clone/plugins/
   // - ./plugins/
-  // - npm packages with cc-clone-plugin- prefix
+  // - npm packages with selek-plugin- prefix
   ```
 
 -----
@@ -720,7 +720,7 @@ npm start
 
 ## ✅ Completion Criteria
 
-Your CC_Clone will be feature-complete when:
+Your Selek will be feature-complete when:
 
 - [ ] Users can switch between 3+ providers seamlessly
 - [ ] At least 3 custom agents are working

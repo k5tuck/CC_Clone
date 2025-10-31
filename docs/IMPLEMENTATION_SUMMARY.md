@@ -1,4 +1,4 @@
-# CC_Clone Conversational TUI - Implementation Summary
+# Selek Conversational TUI - Implementation Summary
 
 **Date**: October 29, 2025  
 **Status**: ✅ Phase 1 Complete - Ready for Testing  
@@ -8,7 +8,7 @@
 
 ## 🎯 Mission Accomplished
 
-We have successfully transformed your CC_Clone from a menu-driven TUI to a **Claude Code-style conversational interface** with real-time streaming, intelligent agent coordination, and persistent conversation history.
+We have successfully transformed your Selek from a menu-driven TUI to a **Claude Code-style conversational interface** with real-time streaming, intelligent agent coordination, and persistent conversation history.
 
 ---
 
@@ -471,5 +471,5 @@ We're here to help! Open an issue or discussion on GitHub.
 
 ---
 
-*Built with ❤️ by the CC_Clone Multi-Agent System*  
+*Built with ❤️ by the Selek Multi-Agent System*  
 *October 29, 2025*

@@ -17,7 +17,10 @@ import {
   getAgentOrchestrator,
 } from '../../src/lib/agents/AgentSystem';
 import { getSkillManager } from '@/lib/skills/SkillManager';
+import { MCPClientManager } from '../mcp/mcp-client';
+import { getAgentManager } from '../lib/agents/AgentManager';
 import * as dotenv from 'dotenv';
+import fs from 'fs/promises';
 
 dotenv.config();
 import { createProjectContext } from '../lib/context/ProjectContextLoader';
@@ -63,6 +66,20 @@ interface AppState {
     keywords: string;
     systemPrompt: string;
   }>;
+
+  // Autocomplete state
+  suggestions: string[];
+  selectedSuggestion: number;
+  showSuggestions: boolean;
+
+  // Agent management UI
+  showAgentManager: boolean;
+  agentManagerMode: 'list' | 'view' | 'edit' | 'delete' | 'templates' | null;
+  selectedAgentId: string | null;
+
+  // Plan approval
+  pendingPlan: { agentType: string; planFile: string; content: string } | null;
+  awaitingApproval: boolean;
 }
 
 // ============================================================================
@@ -405,6 +422,14 @@ const ConversationalTUI: React.FC = () => {
     showAgentCreator: false,
     creatorStep: 'idle',
     creatorData: {},
+    suggestions: [],
+    selectedSuggestion: 0,
+    showSuggestions: false,
+    showAgentManager: false,
+    agentManagerMode: null,
+    selectedAgentId: null,
+    pendingPlan: null,
+    awaitingApproval: false,
   });
 
   const orchestratorRef = useRef<MultiAgentOrchestrator | null>(null);
@@ -415,6 +440,8 @@ const ConversationalTUI: React.FC = () => {
   const agentOrchestratorRef = useRef<AgentOrchestrator | null>(null);
   const agentCreatorRef = useRef<AgentCreator | null>(null);
   const skillManagerRef = useRef<ReturnType<typeof getSkillManager> | null>(null);
+  const mcpManagerRef = useRef<MCPClientManager | null>(null);
+  const agentManagerRef = useRef<ReturnType<typeof getAgentManager> | null>(null);
   const mountedRef = useRef(true);
   const toolClientRef = useRef<StreamingClientWithTools | null>(null);
 
@@ -439,7 +466,54 @@ useEffect(() => {
       // Register all tools
       registerStandardTools(toolClientRef.current);
       console.log('[Tools] Registered:', toolClientRef.current.getAvailableTools());
-      
+
+      // Initialize MCP (Model Context Protocol) servers
+      try {
+        mcpManagerRef.current = new MCPClientManager();
+        const mcpConfigPath = './config/mcp-servers.json';
+
+        try {
+          await fs.access(mcpConfigPath);
+          const configContent = await fs.readFile(mcpConfigPath, 'utf-8');
+          const mcpConfig = JSON.parse(configContent);
+
+          console.log('[MCP] Loading servers from config...');
+
+          for (const server of mcpConfig.servers) {
+            try {
+              await mcpManagerRef.current.connectToServer(server);
+            } catch (error) {
+              console.warn(`[MCP] Failed to connect to ${server.name}:`, error);
+            }
+          }
+
+          // Register MCP tools with the tool client
+          const mcpTools = mcpManagerRef.current.getToolsForLLM();
+          console.log(`[MCP] Registering ${mcpTools.length} MCP tools`);
+
+          for (const tool of mcpTools) {
+            toolClientRef.current.registerTool(
+              tool.name,
+              async (params: Record<string, any>) => {
+                return await mcpManagerRef.current!.callTool(tool.name, params);
+              },
+              tool as any
+            );
+          }
+
+          const mcpStats = mcpManagerRef.current.getStats();
+          console.log(`[MCP] ✓ Loaded ${mcpStats.connectedServers} servers with ${mcpStats.totalTools} tools`);
+        } catch (error: any) {
+          if (error.code === 'ENOENT') {
+            console.log('[MCP] No mcp-servers.json found, skipping MCP initialization');
+          } else {
+            console.warn('[MCP] Failed to load MCP config:', error);
+          }
+        }
+      } catch (error) {
+        console.warn('[MCP] MCP initialization failed:', error);
+      }
+
       // Initialize history manager
       historyManagerRef.current = new ConversationHistoryManager();
       await historyManagerRef.current.initialize();
@@ -475,6 +549,9 @@ useEffect(() => {
       const skillManager = getSkillManager('./skills');
       await skillManager.initialize();
       skillManagerRef.current = skillManager;
+
+      // Initialize agent manager
+      agentManagerRef.current = getAgentManager('./agents');
 
       // Initialize SkillAwareAgent 
       const streamingProvider = createStreamingProviderAdapter(
@@ -525,7 +602,7 @@ useEffect(() => {
       // Add enhanced system message
       await historyManagerRef.current.saveMessage(conversationId, {
         role: 'system',
-        content: `You are CC_Clone, an AI assistant with a multi-agent orchestration system.
+        content: `You are Selek, an AI assistant with a multi-agent orchestration system.
 
         **Available Capabilities:**
         - Spawn specialized agents for complex tasks
@@ -600,6 +677,13 @@ useEffect(() => {
     mountedRef.current = false;
     historyManagerRef.current?.close();
     bufferRef.current?.dispose();
+
+    // Cleanup MCP connections
+    if (mcpManagerRef.current) {
+      mcpManagerRef.current.disconnectAll().catch(error => {
+        console.warn('[MCP] Cleanup error:', error);
+      });
+    }
   };
 }, []);
 
@@ -615,14 +699,33 @@ useEffect(() => {
             ...prev.messages,
             {
               role: 'system',
-              content: `Available commands:
-/agents - Toggle agent list
-/skills - Toggle skills list
-/agent <id> <task> - Execute an agent
-/create-agent - Create a new agent
-/reload - Reload agents and skills
-/clear - Clear messages
-/help - Show this help`,
+              content: `**Available Commands:**
+
+**Chat & System:**
+• /help - Show this help
+• /clear - Clear messages
+• /reload - Reload agents and skills
+
+**Agent Management:**
+• /agent-list - List all agents
+• /agent-view <id> - View agent details
+• /agent-delete <id> - Delete an agent
+• /agent <id> <task> - Execute a specific agent
+• /create-agent - Create a new agent
+• /agents - Toggle agent list display
+
+**Templates:**
+• /templates - List agent templates
+• /template-export <id> [category] - Export agent as template
+• /template-install <template-id> <new-id> - Install template
+
+**Plan Approval:**
+• /approve - Approve pending plan
+• /reject - Reject pending plan
+
+**Other:**
+• /skills - Toggle skills list
+• /mcp - Show MCP servers and tools status`,
             } as Message,
           ],
         }));
@@ -680,6 +783,347 @@ useEffect(() => {
         setState(prev => ({ ...prev, messages: [], agentMessages: [] }));
         return true;
 
+      case '/mcp': {
+        if (!mcpManagerRef.current) {
+          setState(prev => ({
+            ...prev,
+            messages: [
+              ...prev.messages,
+              {
+                role: 'system',
+                content: '❌ MCP is not initialized',
+              } as Message,
+            ],
+          }));
+          return true;
+        }
+
+        const stats = mcpManagerRef.current.getStats();
+        const servers = mcpManagerRef.current.getConnectedServers();
+        const allTools = mcpManagerRef.current.getAllTools();
+
+        let mcpInfo = `**MCP Status**\n\n`;
+        mcpInfo += `✅ Connected Servers: ${stats.connectedServers}\n`;
+        mcpInfo += `🔧 Total Tools: ${stats.totalTools}\n\n`;
+
+        if (servers.length > 0) {
+          mcpInfo += `**Servers:**\n`;
+          for (const server of servers) {
+            const toolCount = stats.byServer[server] || 0;
+            mcpInfo += `  • ${server}: ${toolCount} tools\n`;
+          }
+
+          mcpInfo += `\n**Available Tools:**\n`;
+          for (const { name, serverName } of allTools.slice(0, 20)) {
+            mcpInfo += `  • ${name} (from ${serverName})\n`;
+          }
+
+          if (allTools.length > 20) {
+            mcpInfo += `  ... and ${allTools.length - 20} more\n`;
+          }
+        } else {
+          mcpInfo += `No servers connected. Add servers to config/mcp-servers.json\n`;
+        }
+
+        setState(prev => ({
+          ...prev,
+          messages: [
+            ...prev.messages,
+            {
+              role: 'system',
+              content: mcpInfo,
+            } as Message,
+          ],
+        }));
+        return true;
+      }
+
+      case '/agent-list': {
+        if (!agentManagerRef.current) {
+          setState(prev => ({ ...prev, error: 'Agent manager not initialized' }));
+          return true;
+        }
+
+        try {
+          const agents = await agentManagerRef.current.listAgents();
+          let agentList = `**📋 Agent Library** (${agents.length} agents)\n\n`;
+
+          for (const agent of agents) {
+            agentList += `${agent.metadata.avatar} **${agent.metadata.name}** (\`${agent.metadata.id}\`)\n`;
+            agentList += `   ${agent.metadata.description}\n`;
+            agentList += `   Capabilities: ${agent.metadata.capabilities.join(', ')}\n\n`;
+          }
+
+          agentList += `\nCommands:\n`;
+          agentList += `• /agent-view <id> - View agent details\n`;
+          agentList += `• /agent-delete <id> - Delete an agent\n`;
+          agentList += `• /template-export <id> - Export as template\n`;
+
+          setState(prev => ({
+            ...prev,
+            messages: [...prev.messages, { role: 'system', content: agentList } as Message],
+          }));
+        } catch (error) {
+          setState(prev => ({ ...prev, error: `Failed to list agents: ${error}` }));
+        }
+        return true;
+      }
+
+      case '/agent-view': {
+        if (parts.length < 2) {
+          setState(prev => ({ ...prev, error: 'Usage: /agent-view <agent-id>' }));
+          return true;
+        }
+
+        if (!agentManagerRef.current) {
+          setState(prev => ({ ...prev, error: 'Agent manager not initialized' }));
+          return true;
+        }
+
+        try {
+          const agentId = parts[1];
+          const agent = await agentManagerRef.current.getAgent(agentId);
+
+          if (!agent) {
+            setState(prev => ({ ...prev, error: `Agent not found: ${agentId}` }));
+            return true;
+          }
+
+          let details = `${agent.metadata.avatar} **${agent.metadata.name}**\n\n`;
+          details += `**ID:** \`${agent.metadata.id}\`\n`;
+          details += `**Description:** ${agent.metadata.description}\n`;
+          details += `**Version:** ${agent.metadata.version}\n`;
+          details += `**Capabilities:** ${agent.metadata.capabilities.join(', ')}\n`;
+          details += `**Keywords:** ${agent.metadata.activation_keywords?.join(', ') || 'None'}\n`;
+          details += `**Temperature:** ${agent.config.temperature}\n`;
+          details += `**Max Tokens:** ${agent.config.maxTokens}\n\n`;
+          details += `**System Prompt:**\n\`\`\`\n${agent.config.systemPrompt.substring(0, 300)}...\n\`\`\`\n`;
+
+          setState(prev => ({
+            ...prev,
+            messages: [...prev.messages, { role: 'system', content: details } as Message],
+          }));
+        } catch (error) {
+          setState(prev => ({ ...prev, error: `Failed to view agent: ${error}` }));
+        }
+        return true;
+      }
+
+      case '/agent-delete': {
+        if (parts.length < 2) {
+          setState(prev => ({ ...prev, error: 'Usage: /agent-delete <agent-id>' }));
+          return true;
+        }
+
+        if (!agentManagerRef.current) {
+          setState(prev => ({ ...prev, error: 'Agent manager not initialized' }));
+          return true;
+        }
+
+        try {
+          const agentId = parts[1];
+          await agentManagerRef.current.deleteAgent(agentId);
+
+          setState(prev => ({
+            ...prev,
+            messages: [
+              ...prev.messages,
+              { role: 'system', content: `✅ Deleted agent: ${agentId}` } as Message
+            ],
+          }));
+
+          // Reload agents
+          await agentOrchestratorRef.current?.reloadAgents();
+          const agents = agentOrchestratorRef.current?.listAgents() || [];
+          setState(prev => ({ ...prev, availableAgents: agents }));
+        } catch (error) {
+          setState(prev => ({ ...prev, error: `Failed to delete agent: ${error}` }));
+        }
+        return true;
+      }
+
+      case '/templates': {
+        if (!agentManagerRef.current) {
+          setState(prev => ({ ...prev, error: 'Agent manager not initialized' }));
+          return true;
+        }
+
+        try {
+          const templates = await agentManagerRef.current.listTemplates();
+          let templateList = `**📦 Agent Templates** (${templates.length} available)\n\n`;
+
+          if (templates.length === 0) {
+            templateList += `No templates found. Export an agent with /template-export <agent-id>\n`;
+          } else {
+            for (const template of templates) {
+              templateList += `• **${template.name}** (\`${template.id}\`)\n`;
+              templateList += `  ${template.description}\n`;
+              templateList += `  Category: ${template.category}\n\n`;
+            }
+
+            templateList += `\nCommands:\n`;
+            templateList += `• /template-install <template-id> <new-agent-id> - Install template\n`;
+            templateList += `• /template-export <agent-id> - Export agent as template\n`;
+          }
+
+          setState(prev => ({
+            ...prev,
+            messages: [...prev.messages, { role: 'system', content: templateList } as Message],
+          }));
+        } catch (error) {
+          setState(prev => ({ ...prev, error: `Failed to list templates: ${error}` }));
+        }
+        return true;
+      }
+
+      case '/template-export': {
+        if (parts.length < 2) {
+          setState(prev => ({ ...prev, error: 'Usage: /template-export <agent-id> [category]' }));
+          return true;
+        }
+
+        if (!agentManagerRef.current) {
+          setState(prev => ({ ...prev, error: 'Agent manager not initialized' }));
+          return true;
+        }
+
+        try {
+          const agentId = parts[1];
+          const category = parts[2] || 'custom';
+          await agentManagerRef.current.exportAsTemplate(agentId, category);
+
+          setState(prev => ({
+            ...prev,
+            messages: [
+              ...prev.messages,
+              { role: 'system', content: `✅ Exported ${agentId} as template` } as Message
+            ],
+          }));
+        } catch (error) {
+          setState(prev => ({ ...prev, error: `Failed to export template: ${error}` }));
+        }
+        return true;
+      }
+
+      case '/template-install': {
+        if (parts.length < 3) {
+          setState(prev => ({
+            ...prev,
+            error: 'Usage: /template-install <template-id> <new-agent-id>'
+          }));
+          return true;
+        }
+
+        if (!agentManagerRef.current) {
+          setState(prev => ({ ...prev, error: 'Agent manager not initialized' }));
+          return true;
+        }
+
+        try {
+          const templateId = parts[1];
+          const newAgentId = parts[2];
+          await agentManagerRef.current.importFromTemplate(templateId, newAgentId);
+
+          setState(prev => ({
+            ...prev,
+            messages: [
+              ...prev.messages,
+              { role: 'system', content: `✅ Installed template ${templateId} as ${newAgentId}` } as Message
+            ],
+          }));
+
+          // Reload agents
+          await agentOrchestratorRef.current?.reloadAgents();
+          const agents = agentOrchestratorRef.current?.listAgents() || [];
+          setState(prev => ({ ...prev, availableAgents: agents }));
+        } catch (error) {
+          setState(prev => ({ ...prev, error: `Failed to install template: ${error}` }));
+        }
+        return true;
+      }
+
+      case '/approve': {
+        if (!state.awaitingApproval || !state.pendingPlan) {
+          setState(prev => ({
+            ...prev,
+            error: 'No plan awaiting approval'
+          }));
+          return true;
+        }
+
+        setState(prev => ({
+          ...prev,
+          messages: [
+            ...prev.messages,
+            {
+              role: 'system',
+              content: `✅ Plan approved! Executing ${prev.pendingPlan?.agentType} plan...`
+            } as Message
+          ],
+          awaitingApproval: false,
+          isStreaming: true,
+        }));
+
+        // Execute the plan
+        try {
+          const result = await orchestratorRef.current?.executePlan(state.pendingPlan.planFile);
+
+          if (result?.success) {
+            setState(prev => ({
+              ...prev,
+              messages: [
+                ...prev.messages,
+                {
+                  role: 'system',
+                  content: `✅ Plan executed successfully!\nSteps completed: ${result.completedSteps.length}\nTime: ${result.executionTime.toFixed(2)}s`
+                } as Message
+              ],
+              pendingPlan: null,
+              isStreaming: false,
+            }));
+          } else {
+            setState(prev => ({
+              ...prev,
+              error: `Plan execution failed: ${result?.error?.message}`,
+              pendingPlan: null,
+              isStreaming: false,
+            }));
+          }
+        } catch (error) {
+          setState(prev => ({
+            ...prev,
+            error: `Failed to execute plan: ${error}`,
+            pendingPlan: null,
+            isStreaming: false,
+          }));
+        }
+        return true;
+      }
+
+      case '/reject': {
+        if (!state.awaitingApproval || !state.pendingPlan) {
+          setState(prev => ({
+            ...prev,
+            error: 'No plan awaiting approval'
+          }));
+          return true;
+        }
+
+        setState(prev => ({
+          ...prev,
+          messages: [
+            ...prev.messages,
+            {
+              role: 'system',
+              content: `❌ Plan rejected. How would you like to modify the approach?`
+            } as Message
+          ],
+          awaitingApproval: false,
+          pendingPlan: null,
+        }));
+        return true;
+      }
+
       default:
         return false;
     }
@@ -730,6 +1174,136 @@ useEffect(() => {
     }
   };
 
+  // Generate autocomplete suggestions
+  const generateSuggestions = (input: string): string[] => {
+    if (!input.startsWith('/')) {
+      return [];
+    }
+
+    const commands = [
+      '/help',
+      '/clear',
+      '/reload',
+      '/agents',
+      '/agent-list',
+      '/agent-view ',
+      '/agent-delete ',
+      '/skills',
+      '/mcp',
+      '/create-agent',
+      '/templates',
+      '/template-export ',
+      '/template-install ',
+      '/approve',
+      '/reject',
+    ];
+
+    // Add agent-specific commands
+    if (state.availableAgents.length > 0) {
+      for (const agent of state.availableAgents) {
+        commands.push(`/agent ${agent.id} `);
+        commands.push(`/agent-view ${agent.id}`);
+        commands.push(`/agent-delete ${agent.id}`);
+        commands.push(`/template-export ${agent.id}`);
+      }
+    }
+
+    const matches = commands.filter(cmd =>
+      cmd.toLowerCase().startsWith(input.toLowerCase())
+    );
+
+    return matches.slice(0, 15); // Limit to 15 suggestions
+  };
+
+  // Update suggestions when input changes
+  useEffect(() => {
+    if (state.currentInput.startsWith('/') && state.currentInput.length > 1) {
+      const suggestions = generateSuggestions(state.currentInput);
+      if (suggestions.length > 0) {
+        setState(prev => ({
+          ...prev,
+          suggestions,
+          showSuggestions: true,
+          selectedSuggestion: 0,
+        }));
+      } else {
+        setState(prev => ({
+          ...prev,
+          suggestions: [],
+          showSuggestions: false,
+        }));
+      }
+    } else {
+      setState(prev => ({
+        ...prev,
+        suggestions: [],
+        showSuggestions: false,
+      }));
+    }
+  }, [state.currentInput, state.availableAgents]);
+
+  // Auto-suggest best agent for the user's request
+  const suggestAgent = (userMessage: string): { agentId: string; confidence: number; reason: string } | null => {
+    if (!state.availableAgents || state.availableAgents.length === 0) {
+      return null;
+    }
+
+    const message = userMessage.toLowerCase();
+    const scores: Array<{ agentId: string; score: number; matchedKeywords: string[] }> = [];
+
+    for (const agent of state.availableAgents) {
+      let score = 0;
+      const matchedKeywords: string[] = [];
+
+      // Check activation keywords
+      const keywords = agent.metadata?.activation_keywords || [];
+      for (const keyword of keywords) {
+        if (message.includes(keyword.toLowerCase())) {
+          score += 10;
+          matchedKeywords.push(keyword);
+        }
+      }
+
+      // Check capabilities
+      const capabilities = agent.metadata?.capabilities || [];
+      for (const capability of capabilities) {
+        const capWords = capability.toLowerCase().replace(/_/g, ' ').split(' ');
+        for (const word of capWords) {
+          if (word.length > 3 && message.includes(word)) {
+            score += 5;
+            matchedKeywords.push(capability);
+          }
+        }
+      }
+
+      // Check agent name
+      if (message.includes(agent.name.toLowerCase())) {
+        score += 15;
+      }
+
+      if (score > 0) {
+        scores.push({ agentId: agent.id, score, matchedKeywords });
+      }
+    }
+
+    // Sort by score and return best match
+    scores.sort((a, b) => b.score - a.score);
+
+    if (scores.length > 0 && scores[0].score >= 10) {
+      const best = scores[0];
+      const agent = state.availableAgents.find(a => a.id === best.agentId)!;
+      const reason = `Matched keywords: ${best.matchedKeywords.slice(0, 3).join(', ')}`;
+
+      return {
+        agentId: best.agentId,
+        confidence: Math.min(best.score / 30, 1), // Normalize to 0-1
+        reason,
+      };
+    }
+
+    return null;
+  };
+
   const handleSubmit = async (): Promise<void> => {
     if (!state.currentInput.trim() || !state.conversationId) return;
     if (!bridgeRef.current || !historyManagerRef.current || !bufferRef.current) return;
@@ -769,6 +1343,28 @@ useEffect(() => {
       role: 'user',
       content: userMessage,
     });
+
+    // Auto-suggest agent if appropriate
+    const suggestion = suggestAgent(userMessage);
+    if (suggestion && suggestion.confidence > 0.5) {
+      const suggestedAgent = state.availableAgents.find(a => a.id === suggestion.agentId);
+      if (suggestedAgent) {
+        const suggestionMsg = `💡 **Agent Suggestion:** ${suggestedAgent.avatar} **${suggestedAgent.name}** might be best suited for this task.\n` +
+          `   Reason: ${suggestion.reason}\n` +
+          `   Confidence: ${(suggestion.confidence * 100).toFixed(0)}%\n\n` +
+          `   Use \`/agent ${suggestedAgent.id} ${userMessage}\` to execute with this agent specifically.\n`;
+
+        await historyManagerRef.current.saveMessage(state.conversationId, {
+          role: 'system',
+          content: suggestionMsg,
+        });
+
+        setState(prev => ({
+          ...prev,
+          messages: [...prev.messages, { role: 'system', content: suggestionMsg } as Message],
+        }));
+      }
+    }
 
     // Get conversation history
     const history = await historyManagerRef.current.getHistory(state.conversationId);
@@ -911,6 +1507,47 @@ useEffect(() => {
       return;
     }
 
+    // Handle autocomplete suggestions
+    if (state.showSuggestions && state.suggestions.length > 0) {
+      if (key.upArrow) {
+        setState(prev => ({
+          ...prev,
+          selectedSuggestion: Math.max(0, prev.selectedSuggestion - 1),
+        }));
+        return;
+      }
+      if (key.downArrow) {
+        setState(prev => ({
+          ...prev,
+          selectedSuggestion: Math.min(prev.suggestions.length - 1, prev.selectedSuggestion + 1),
+        }));
+        return;
+      }
+      if (key.tab) {
+        // Accept selected suggestion
+        const selected = state.suggestions[state.selectedSuggestion];
+        setState(prev => ({
+          ...prev,
+          currentInput: selected,
+          cursorPosition: selected.length,
+          showSuggestions: false,
+          suggestions: [],
+          selectedSuggestion: 0,
+        }));
+        return;
+      }
+      if (key.escape) {
+        // Dismiss suggestions
+        setState(prev => ({
+          ...prev,
+          showSuggestions: false,
+          suggestions: [],
+          selectedSuggestion: 0,
+        }));
+        return;
+      }
+    }
+
     if (state.showAgentCreator && key.escape) {
       setState(prev => ({
         ...prev,
@@ -985,7 +1622,7 @@ useEffect(() => {
   >
     <Text color="#CD853F">✱ </Text>
     <Text>Welcome to the </Text>
-    <Text bold>Claude Code Clone</Text>
+    <Text bold>Selek</Text>
     <Text> playground!</Text>
   </Box>
 
@@ -996,38 +1633,38 @@ useEffect(() => {
 
   {/* ASCII Art Header */}
   <Box marginBottom={1}>
-      <Text bold color="#CD853F">
-        {'  ██████╗ ██████╗     ██████╗██╗      ██████╗ ███╗   ██╗███████╗'}
+      <Text bold color="#00D9FF">
+        {'     ███████╗███████╗██╗     ███████╗██╗  ██╗'}
       </Text>
     </Box>
     <Box marginBottom={1}>
-      <Text bold color="#CD853F">
-        {'██╔════╝██╔════╝    ██╔════╝██║     ██╔═══██╗████╗  ██║██╔════╝'}
+      <Text bold color="#00D9FF">
+        {'     ██╔════╝██╔════╝██║     ██╔════╝██║ ██╔╝'}
       </Text>
     </Box>
     <Box marginBottom={1}>
-      <Text bold color="#CD853F">
-        {'██║     ██║         ██║     ██║     ██║   ██║██╔██╗ ██║█████╗  '}
+      <Text bold color="#00D9FF">
+        {'     ███████╗█████╗  ██║     █████╗  █████╔╝ '}
       </Text>
     </Box>
     <Box marginBottom={1}>
-      <Text bold color="#CD853F">
-        {'██║     ██║         ██║     ██║     ██║   ██║██║╚██╗██║██╔══╝  '}
+      <Text bold color="#00D9FF">
+        {'     ╚════██║██╔══╝  ██║     ██╔══╝  ██╔═██╗ '}
       </Text>
     </Box>
     <Box marginBottom={1}>
-      <Text bold color="#CD853F">
-        {'╚██████╗╚██████╗    ╚██████╗███████╗╚██████╔╝██║ ╚████║███████╗'}
+      <Text bold color="#00D9FF">
+        {'     ███████║███████╗███████╗███████╗██║  ██╗'}
       </Text>
     </Box>
     <Box marginBottom={1}>
-      <Text bold color="#CD853F">
-        {' ╚═════╝ ╚═════╝     ╚═════╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝'}
+      <Text bold color="#00D9FF">
+        {'     ╚══════╝╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝'}
       </Text>
     </Box>
-    
+
     <Box marginBottom={1} marginTop={1}>
-      <Text color="#CD853F">        🤖 AI Assistant v1.0</Text>
+      <Text color="#00D9FF">     🧠 Systematic Multi-Agent AI Platform v2.0</Text>
     </Box>
 
       {/* Error */}
@@ -1134,6 +1771,21 @@ useEffect(() => {
           cursorPosition={state.cursorPosition}
           isActive={!state.isStreaming}
         />
+      )}
+
+      {/* Autocomplete Suggestions */}
+      {state.showSuggestions && state.suggestions.length > 0 && (
+        <Box flexDirection="column" marginTop={0} borderStyle="round" borderColor="yellow" paddingX={1}>
+          <Text color="yellow" bold>💡 Suggestions (Tab to accept, ↑↓ to navigate, Esc to dismiss):</Text>
+          {state.suggestions.map((suggestion, idx) => (
+            <Box key={idx} paddingLeft={1}>
+              <Text color={idx === state.selectedSuggestion ? 'cyan' : 'gray'}>
+                {idx === state.selectedSuggestion ? '▶ ' : '  '}
+                {suggestion}
+              </Text>
+            </Box>
+          ))}
+        </Box>
       )}
 
       {/* Loading indicator */}
