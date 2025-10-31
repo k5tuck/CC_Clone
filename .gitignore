@@ -8,3 +8,5 @@ node_modules
 
 **/agent-registry.json
 package-lock.json
+
+debug.log
