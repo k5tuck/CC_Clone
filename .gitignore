@@ -8,5 +8,6 @@ node_modules
 
 **/agent-registry.json
 package-lock.json
+mcp-servers.json
 
 debug.log

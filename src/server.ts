@@ -1,6 +1,8 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { MultiAgentOrchestrator, TaskRequest } from './lib/orchestrator/multi-agent-orchestrator';
 import { ConversationStore } from './lib/persistence/conversation-store';
+import { createChatRoutes } from './routes/chat-routes';
+import { OllamaClient } from './lib/llm/ollama-client';
 import dotenv  from 'dotenv';
 import cors from 'cors';
 
@@ -27,6 +29,7 @@ class AgentServer {
   private app: express.Application;
   private orchestrator: MultiAgentOrchestrator;
   private conversationStore: ConversationStore;
+  private llmClient: OllamaClient;
   private port: number;
 
   constructor(port: number = 3000) {
@@ -35,6 +38,12 @@ class AgentServer {
 
     const ollamaEndpoint = process.env.OLLAMA_ENDPOINT || 'http://localhost:11434';
     const ollamaModel = process.env.OLLAMA_MODEL || 'llama3.1:latest';
+
+    // Create shared LLM client
+    this.llmClient = new OllamaClient({
+      baseUrl: ollamaEndpoint,
+      model: ollamaModel,
+    });
 
     this.orchestrator = new MultiAgentOrchestrator(ollamaEndpoint, ollamaModel);
     this.conversationStore = new ConversationStore();
@@ -66,8 +75,7 @@ class AgentServer {
     // Health check
     this.app.get('/health', async (req: Request, res: Response) => {
       try {
-        const llm = this.orchestrator.getLLMClient();
-        const health = await llm.healthCheck();
+        const health = await this.llmClient.healthCheck();
 
         res.json({
           status: health.healthy ? 'healthy' : 'unhealthy',
@@ -81,6 +89,16 @@ class AgentServer {
         });
       }
     });
+
+    // ========================================
+    // CHAT API ROUTES (NEW!)
+    // ========================================
+    const chatRouter = createChatRoutes(this.llmClient);
+    this.app.use('/api/chat', chatRouter);
+
+    // ========================================
+    // ORCHESTRATOR API ROUTES (EXISTING)
+    // ========================================
 
     // Spawn agents and create plans
     this.app.post('/api/agents/spawn', async (req: Request, res: Response, next: NextFunction) => {
@@ -305,8 +323,6 @@ class AgentServer {
     });
   }
 
-
-
   /**
    * Setup error handling
    */
@@ -343,21 +359,40 @@ class AgentServer {
       await this.conversationStore.initialize();
       console.log('✅ Conversation store initialized');
 
+      // Check LLM health
+      const health = await this.llmClient.healthCheck();
+      if (health.healthy) {
+        console.log('✅ LLM client healthy');
+      } else {
+        console.warn('⚠️  LLM client unhealthy');
+      }
+
       // Start Express server
       this.app.listen(this.port, () => {
         console.log(`✅ Server listening on http://localhost:${this.port}`);
-        console.log('\nAvailable endpoints:');
+        console.log('\n📝 Available endpoints:');
         console.log('  GET  /health');
+        console.log('\n  🗨️  Chat API:');
+        console.log('  POST /api/chat/sessions');
+        console.log('  POST /api/chat/sessions/:id/messages');
+        console.log('  GET  /api/chat/sessions/:id');
+        console.log('  GET  /api/chat/sessions');
+        console.log('  DELETE /api/chat/sessions/:id');
+        console.log('  POST /api/chat/sessions/:id/clear');
+        console.log('  GET  /api/chat/sessions/:id/tools');
+        console.log('  GET  /api/chat/sessions/:id/history');
+        console.log('\n  🤖 Orchestrator API:');
         console.log('  POST /api/agents/spawn');
         console.log('  POST /api/plans/execute');
         console.log('  GET  /api/agents');
         console.log('  GET  /api/agents/search');
+        console.log('\n  💬 Conversation API:');
         console.log('  POST /api/conversations');
         console.log('  GET  /api/conversations');
         console.log('  GET  /api/conversations/:id');
         console.log('  GET  /api/conversations/search');
         console.log('  DELETE /api/conversations/:id');
-        console.log('  GET  /api/stats');
+        console.log('  GET  /api/stats\n');
       });
     } catch (error: any) {
       console.error('❌ Failed to start server:', error.message);
