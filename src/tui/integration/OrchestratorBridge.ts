@@ -218,142 +218,320 @@ export class OrchestratorBridge {
   /**
    * Stream a direct LLM response
    */
-  private async *streamResponse(
-    conversationId: string,
-    userMessage: string
-  ): AsyncGenerator<StreamEvent> {
-    // Get conversation context
-    const context = await this.historyManager.getContext(conversationId);
-    
-    // Convert to LLM format
-    const messages = context.map(msg => ({
-      role: msg.role as 'user' | 'assistant' | 'system',
-      content: msg.content,
-    }));
+private async *streamResponse(
+  conversationId: string,
+  userMessage: string
+): AsyncGenerator<StreamEvent> {
+  // Get conversation context
+  const context = await this.historyManager.getContext(conversationId);
+  
+  // Convert to LLM format
+  const messages = context.map(msg => ({
+    role: msg.role as 'user' | 'assistant' | 'system',
+    content: msg.content,
+  }));
 
-    let fullResponse = '';
+  let fullResponse = '';
 
-    // Stream from LLM
-    for await (const event of this.streamingClient.stream(messages)) {
-      if (event.type === 'token') {
-        fullResponse += event.data;
-      }
+  // Stream from LLM
+  for await (const event of this.streamingClient.stream(messages)) {
+    if (event.type === 'token') {
+      fullResponse += event.data;
+      yield event;
+    } 
+    else if (event.type === 'done') {
+      // IMPORTANT: Save BEFORE yielding done
+      await this.historyManager.saveMessage(conversationId, {
+        role: 'assistant',
+        content: fullResponse,
+      });
+      
+      // Now yield done
+      yield event;
+    } 
+    else {
       yield event;
     }
-
-    // Save assistant response
-    await this.historyManager.saveMessage(conversationId, {
-      role: 'assistant',
-      content: fullResponse,
-    });
   }
+}
 
   /**
    * Handle system commands
    */
-  private async *handleCommand(
-    conversationId: string,
-    intent: CommandIntent
-  ): AsyncGenerator<StreamEvent> {
-    const { command, args } = intent.data;
+ private async *handleCommand(
+  conversationId: string,
+  intent: CommandIntent
+): AsyncGenerator<StreamEvent> {
+  const { command, args } = intent.data;
 
-    switch (command.toLowerCase()) {
-      case 'help':
-        yield {
-          type: 'token',
-          data: this.getHelpText(),
-        };
-        break;
+  switch (command.toLowerCase()) {
+    case 'help':
+      yield {
+        type: 'token',
+        data: this.getHelpText(),
+      };
+      break;
 
-      case 'agents':
-        const agents = this.orchestrator.getAgentRegistry();
-        let agentList = '🤖 **Active Agents:**\n\n';
-        
-        if (agents.length === 0) {
-          agentList += 'No agents currently active.\n';
-        } else {
-          agents.forEach(agent => {
-            agentList += `• ${agent.agentId} [${agent.status}]\n`;
-            agentList += `  Task: ${agent.task}\n\n`;
-          });
-        }
-        
-        yield { type: 'token', data: agentList };
-        break;
+    case 'agents':
+      const agents = this.orchestrator.getAgentRegistry();
+      let agentList = '🤖 **Active Agents:**\n\n';
+      
+      if (agents.length === 0) {
+        agentList += 'No agents currently active.\n';
+      } else {
+        agents.forEach(agent => {
+          agentList += `• **${agent.agentId}** [${agent.status}]\n`;
+          agentList += `  Task: ${agent.task}\n`;
+          agentList += `  Created: ${new Date(agent.timestamp || Date.now()).toLocaleString()}\n\n`;
+        });
+      }
+      
+      yield { type: 'token', data: agentList };
+      break;
 
-      case 'clear':
-        await this.historyManager.deleteConversation(conversationId);
-        
-        // Create new conversation
-        const newId = await this.historyManager.createConversation(
-          `Chat ${new Date().toLocaleString()}`
-        );
-        
-        yield {
-          type: 'token',
-          data: '✅ Conversation cleared. Starting fresh!\n',
-        };
-        break;
+    case 'spawn':
+      yield* this.handleSpawnCommand(conversationId, args);
+      break;
 
-      case 'stats':
-        const stats = await this.historyManager.getStatistics(conversationId);
-        let statsText = '📊 **Conversation Statistics:**\n\n';
-        statsText += `• Total Messages: ${stats.totalMessages}\n`;
-        statsText += `• Conversations: ${stats.totalConversations}\n`;
-        statsText += `• Average: ${stats.averageMessagesPerConversation.toFixed(1)} msgs/conv\n`;
-        
-        yield { type: 'token', data: statsText };
-        break;
+    case 'kill':
+      yield* this.handleKillCommand(conversationId, args);
+      break;
 
-      case 'export':
-        const format = (args[0] || 'markdown') as 'json' | 'markdown' | 'txt';
-        const exported = await this.historyManager.export(conversationId, format);
-        const filename = `conversation-${Date.now()}.${format}`;
-        
-        // In a real implementation, write to file
-        yield {
-          type: 'token',
-          data: `✅ Conversation exported to ${filename}\n\n${exported.slice(0, 500)}...\n`,
-        };
-        break;
+    case 'clear':
+      await this.historyManager.deleteConversation(conversationId);
+      
+      const newId = await this.historyManager.createConversation(
+        `Chat ${new Date().toLocaleString()}`
+      );
+      
+      yield {
+        type: 'token',
+        data: '✅ Conversation cleared. Starting fresh!\n',
+      };
+      break;
 
-      default:
-        yield {
-          type: 'error',
-          error: new Error(`Unknown command: /${command}. Type /help for available commands.`),
-        };
-    }
+    case 'stats':
+      const stats = await this.historyManager.getStatistics(conversationId);
+      const agentStats = {
+        total: this.orchestrator.getAgentRegistry().length,
+        active: this.orchestrator.getAgentsByStatus('active').length,
+        completed: this.orchestrator.getAgentsByStatus('completed').length,
+        failed: this.orchestrator.getAgentsByStatus('failed').length,
+      };
 
-    yield { type: 'done', final: '' };
+      let statsText = '📊 **System Statistics:**\n\n';
+      statsText += '**Agents:**\n';
+      statsText += `  • Total: ${agentStats.total}\n`;
+      statsText += `  • Active: ${agentStats.active}\n`;
+      statsText += `  • Completed: ${agentStats.completed}\n`;
+      statsText += `  • Failed: ${agentStats.failed}\n\n`;
+      statsText += '**Conversations:**\n';
+      statsText += `  • Total Messages: ${stats.totalMessages}\n`;
+      statsText += `  • Total Conversations: ${stats.totalConversations}\n`;
+      statsText += `  • Average: ${stats.averageMessagesPerConversation.toFixed(1)} msgs/conv\n`;
+      
+      yield { type: 'token', data: statsText };
+      break;
+
+    case 'export':
+      const format = (args[0] || 'markdown') as 'json' | 'markdown' | 'txt';
+      const exported = await this.historyManager.export(conversationId, format);
+      const filename = `conversation-${Date.now()}.${format}`;
+      
+      yield {
+        type: 'token',
+        data: `✅ Conversation exported to ${filename}\n\n${exported.slice(0, 500)}...\n`,
+      };
+      break;
+
+    default:
+      yield {
+        type: 'error',
+        error: new Error(`Unknown command: /${command}. Type /help for available commands.`),
+      };
   }
 
-  /**
-   * Get help text
-   */
-  private getHelpText(): string {
-    return `
+  yield { type: 'done', final: '' };
+}
+
+/**
+ * Handle /spawn command
+ */
+private async *handleSpawnCommand(
+  conversationId: string,
+  args: string[]
+): AsyncGenerator<StreamEvent> {
+  if (args.length < 2) {
+    yield {
+      type: 'error',
+      error: new Error('Usage: /spawn <type> <task description>\nTypes: implementation, security, performance'),
+    };
+    return;
+  }
+
+  const agentType = args[0].toLowerCase();
+  const task = args.slice(1).join(' ');
+
+  const validTypes = ['implementation', 'security', 'performance'];
+  if (!validTypes.includes(agentType)) {
+    yield {
+      type: 'error',
+      error: new Error(`Invalid agent type: ${agentType}.\nValid types: ${validTypes.join(', ')}`),
+    };
+    return;
+  }
+
+  yield {
+    type: 'token',
+    data: `🚀 Spawning ${agentType} agent...\n\n`,
+  };
+
+  try {
+    const domain = this.inferDomainFromType(agentType);
+    
+    const taskRequest: TaskRequest = {
+      description: task,
+      domain,
+      requiredAgents: [agentType],
+      autoExecute: false,
+      parallel: false,
+    };
+
+    const result = await this.orchestrator.executeTask(taskRequest);
+
+    let response = `✅ Agent spawned successfully!\n\n`;
+    response += `**Agent:** ${agentType}\n`;
+    response += `**Task:** ${task}\n\n`;
+    response += `**Plan:**\n`;
+    
+    for (const [agentId, plan] of Object.entries(result.plans)) {
+      response += `\n🤖 **${agentId}**\n`;
+      response += `${plan}\n`;
+    }
+
+    yield { type: 'token', data: response };
+    
+    await this.historyManager.saveMessage(conversationId, {
+      role: 'assistant',
+      content: response,
+      metadata: {
+        agentId: 'orchestrator',
+        command: 'spawn',
+      },
+    });
+
+  } catch (error: any) {
+    const errorMsg = `❌ Failed to spawn agent: ${error.message}`;
+    yield { type: 'error', error: new Error(errorMsg) };
+    
+    await this.historyManager.saveMessage(conversationId, {
+      role: 'assistant',
+      content: errorMsg,
+      metadata: { error: new Error(error.message) },
+    });
+  }
+}
+
+/**
+ * Handle /kill command
+ */
+private async *handleKillCommand(
+  conversationId: string,
+  args: string[]
+): AsyncGenerator<StreamEvent> {
+  if (args.length === 0) {
+    yield {
+      type: 'error',
+      error: new Error('Usage: /kill <agent-id>\nUse /agents to see active agents'),
+    };
+    return;
+  }
+
+  const agentId = args[0];
+  
+  try {
+    // Check if agent exists
+    const agents = this.orchestrator.getAgentRegistry();
+    const agent = agents.find(a => a.agentId === agentId);
+
+    if (!agent) {
+      yield {
+        type: 'error',
+        error: new Error(`Agent not found: ${agentId}\nUse /agents to see active agents`),
+      };
+      return;
+    }
+
+    // Kill the agent (you'll need to implement this in orchestrator)
+    // For now, just acknowledge
+    const response = `⚠️ Terminated agent: ${agentId}\n\nNote: Agent termination is not yet implemented. This is a placeholder.`;
+    
+    yield { type: 'token', data: response };
+    
+    await this.historyManager.saveMessage(conversationId, {
+      role: 'assistant',
+      content: response,
+      metadata: {
+        agentId: 'orchestrator',
+        command: 'kill',
+      },
+    });
+
+  } catch (error: any) {
+    const errorMsg = `❌ Failed to kill agent: ${error.message}`;
+    yield { type: 'error', error: new Error(errorMsg) };
+  }
+}
+
+/**
+ * Infer domain from agent type
+ */
+private inferDomainFromType(agentType: string): string {
+  switch (agentType) {
+    case 'security':
+      return 'Application Security';
+    case 'performance':
+      return 'Performance Optimization';
+    case 'implementation':
+    default:
+      return 'TypeScript Development';
+  }
+}
+
+/**
+ * Get help text with spawn/kill commands
+ */
+private getHelpText(): string {
+  return `
 📖 **CC_Clone Help**
 
 **Available Commands:**
-• /help - Show this help message
-• /agents - List active agents
-• /clear - Clear conversation history
-• /stats - Show conversation statistics
-• /export [format] - Export conversation (json|markdown|txt)
-• /exit - Exit application (or use Ctrl+C)
+- /help - Show this help message
+- /agents - List active agents and their status
+- /spawn <type> <task> - Manually spawn an agent
+  Types: implementation, security, performance
+  Example: /spawn implementation Create a login API
+- /kill <agent-id> - Terminate a specific agent
+- /clear - Clear conversation history
+- /stats - Show conversation and system statistics
+- /export [format] - Export conversation (json|markdown|txt)
+- /exit - Exit application (or use Ctrl+C)
 
 **Usage:**
-• Just type naturally to chat with the AI
-• Mention tasks like "implement X" to spawn agents
-• Use commands starting with / for system actions
+- Just type naturally to chat with the AI
+- Mention tasks like "implement X" to auto-spawn agents
+- Use /spawn for manual agent control
+- Use /agents to monitor active agents
+- Use /kill to stop agents
 
 **Examples:**
-• "Implement a user authentication system"
-• "What is TypeScript?"
-• "/agents" to see active agents
-• "/export markdown" to save conversation
+- "Implement a user authentication system" (auto-spawns agent)
+- "/spawn security Audit the login flow" (manual spawn)
+- "/agents" (list all agents)
+- "/kill agent-123" (terminate agent)
+- "/stats" (show statistics)
 
 Type your message and press Enter to send.
 `;
-  }
+}
 }

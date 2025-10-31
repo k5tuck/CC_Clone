@@ -8,6 +8,7 @@ export interface Message {
   timestamp: Date;
   metadata?: {
     agentId?: string;
+    command?: string;
     toolName?: string;
     toolArgs?: any;
     toolResult?: any;

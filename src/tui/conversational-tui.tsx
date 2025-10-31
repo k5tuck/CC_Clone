@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import React, { useState, useEffect, useRef } from 'react';
 import { render, Box, Text, useInput } from 'ink';
-import { StreamingClient, Message as StreamMessage } from '../lib/streaming/StreamingClient';
+import { OrchestratorBridge } from './integration/OrchestratorBridge';
+import { MultiAgentOrchestrator } from '../lib/orchestrator/multi-agent-orchestrator';
+import { StreamingClient } from '../lib/streaming/StreamingClient';
 import { ResponseBuffer } from '../lib/streaming/ResponseBuffer';
 import { ConversationHistoryManager, Message } from '../lib/history/ConversationHistoryManager';
 import * as dotenv from 'dotenv';
@@ -17,6 +19,7 @@ interface AppState {
   error: string | null;
   status: string;
   initialized: boolean;
+  activeAgents: number;
 }
 
 const Spinner: React.FC<{ label?: string }> = ({ label }) => {
@@ -47,9 +50,11 @@ const ConversationalTUI: React.FC = () => {
     error: null,
     status: 'Initializing...',
     initialized: false,
+    activeAgents: 0
   });
 
-  const streamingClientRef = useRef<StreamingClient | null>(null);
+  const orchestratorRef = useRef<MultiAgentOrchestrator | null>(null);
+  const bridgeRef = useRef<OrchestratorBridge | null>(null);
   const historyManagerRef = useRef<ConversationHistoryManager | null>(null);
   const bufferRef = useRef<ResponseBuffer | null>(null);
 
@@ -62,22 +67,76 @@ const ConversationalTUI: React.FC = () => {
         const endpoint = process.env.OLLAMA_ENDPOINT || 'http://localhost:11434';
         const model = process.env.OLLAMA_MODEL || 'llama3.1:latest';
 
-        streamingClientRef.current = new StreamingClient(endpoint, model);
-        historyManagerRef.current = new ConversationHistoryManager();
+        setState(prev => ({ ...prev, status: 'Initializing orchestrator...' }));
+
+        // Initialize orchestrator
+        const orchestrator = new MultiAgentOrchestrator(endpoint, model);
+        await orchestrator.initialize();
+        orchestratorRef.current = orchestrator;
+
+        setState(prev => ({ ...prev, status: 'Initializing history...' }));
+
+        // Initialize history manager
+        const historyManager = new ConversationHistoryManager();
+        await historyManager.initialize();
+        historyManagerRef.current = historyManager;
+
+        // Initialize streaming client
+        const streamingClient = new StreamingClient(endpoint, model);
+
+        // Initialize buffer
         bufferRef.current = new ResponseBuffer({ flushInterval: 50 });
 
-        await historyManagerRef.current.initialize();
+        // Create orchestrator bridge
+        const bridge = new OrchestratorBridge(
+          orchestrator,
+          streamingClient,
+          historyManager
+        );
+        bridgeRef.current = bridge;
 
-        const conversationId = await historyManagerRef.current.createConversation(
+        setState(prev => ({ ...prev, status: 'Creating conversation...' }));
+
+        // Create conversation
+        const conversationId = await historyManager.createConversation(
           `Chat ${new Date().toLocaleString()}`
         );
 
-        await historyManagerRef.current.saveMessage(conversationId, {
+        // Add enhanced system message
+        await historyManager.saveMessage(conversationId, {
           role: 'system',
-          content: 'You are a helpful AI assistant with access to a multi-agent system. Answer questions concisely and accurately.',
+          content: `You are CC_Clone, an AI assistant with a multi-agent orchestration system.
+
+        **Available Capabilities:**
+        - Spawn specialized agents for complex tasks:
+          • Implementation Agent - TypeScript/JavaScript development
+          • Security Agent - Security audits and vulnerability analysis
+          • Performance Agent - Performance optimization and profiling
+        - Execute bash commands safely
+        - Read, write, and search files in the codebase
+        - Answer questions and provide guidance
+
+        **Available Commands:**
+        /help - Show detailed help and available commands
+        /agents - List currently active agents and their status
+        /spawn <type> <task> - Manually spawn an agent (types: implementation, security, performance)
+        /kill <agent-id> - Terminate a specific agent
+        /clear - Clear conversation history and start fresh
+        /stats - Show conversation and system statistics
+        /export [format] - Export conversation (json|markdown|txt)
+
+        **How to Use:**
+        - Ask questions naturally, and I'll answer directly
+        - Request implementation work like "Implement a user authentication system"
+        - Request security audits like "Audit the security of the login flow"
+        - Request optimizations like "Optimize the database query performance"
+        - Use /spawn to manually create agents: "/spawn implementation Create a REST API"
+        - Use commands starting with / for system actions
+
+        I will automatically coordinate specialized agents when needed for complex tasks.`,
         });
 
-        const messages = await historyManagerRef.current.getHistory(conversationId);
+        const messages = await historyManager.getHistory(conversationId);
 
         if (mounted) {
           setState(prev => ({
@@ -109,85 +168,95 @@ const ConversationalTUI: React.FC = () => {
     };
   }, []);
 
-  const handleSubmit = async () => {
-    if (!state.currentInput.trim() || !state.conversationId) return;
-    if (!streamingClientRef.current || !historyManagerRef.current || !bufferRef.current) return;
+ const handleSubmit = async () => {
+  if (!state.currentInput.trim() || !state.conversationId) return;
+  if (!bridgeRef.current || !historyManagerRef.current || !bufferRef.current) return;
 
-    const userMessage = state.currentInput.trim();
-    
-    setState(prev => ({ 
-      ...prev, 
-      currentInput: '', 
-      isStreaming: true, 
-      streamingContent: '' 
-    }));
+  const userMessage = state.currentInput.trim();
+  
+  setState(prev => ({ 
+    ...prev, 
+    currentInput: '', 
+    isStreaming: true, 
+    streamingContent: '',
+    error: null
+  }));
 
-    try {
-      // Save user message
-      await historyManagerRef.current.saveMessage(state.conversationId, {
-        role: 'user',
-        content: userMessage,
-      });
+  try {
+    // Process through orchestrator bridge
+    let fullResponse = '';
+    const buffer = bufferRef.current;
+    let isFirstToken = true;
 
-      // Reload messages
-      const updatedMessages = await historyManagerRef.current.getHistory(state.conversationId);
-      setState(prev => ({ ...prev, messages: updatedMessages }));
-
-      // Get context for LLM
-      const context = await historyManagerRef.current.getContext(state.conversationId);
-      const llmMessages: StreamMessage[] = context.map(m => ({
-        role: m.role as 'user' | 'assistant' | 'system',
-        content: m.content,
+    const unsubscribe = buffer.onFlush((text) => {
+      fullResponse += text;
+      setState(prev => ({ 
+        ...prev, 
+        streamingContent: fullResponse 
       }));
-
-      // Stream response
-      let fullResponse = '';
-      const buffer = bufferRef.current;
-
-      const unsubscribe = buffer.onFlush((text) => {
-        fullResponse += text;
+    });
+ 
+    for await (const event of bridgeRef.current.processMessage(state.conversationId, userMessage)) {
+      if (event.type === 'token') {
+        // On first token, reload messages to show user input
+        if (isFirstToken) {
+          const updatedMessages = await historyManagerRef.current.getHistory(state.conversationId);
+          setState(prev => ({ ...prev, messages: updatedMessages }));
+          isFirstToken = false;
+        }
+        buffer.append(event.data);
+      } else if (event.type === 'done') {
+        buffer.flush();
+        unsubscribe();
+        
+        // IMPORTANT: Wait a bit for the message to be saved, then reload
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const finalMessages = await historyManagerRef.current.getHistory(state.conversationId);
         setState(prev => ({ 
           ...prev, 
-          streamingContent: fullResponse 
+          messages: finalMessages, 
+          isStreaming: false, 
+          streamingContent: '' 
         }));
-      });
-
-      for await (const event of streamingClientRef.current.stream(llmMessages)) {
-        if (event.type === 'token') {
-          buffer.append(event.data);
-        } else if (event.type === 'done') {
-          buffer.flush();
-          unsubscribe();
-          
-          await historyManagerRef.current.saveMessage(state.conversationId, {
-            role: 'assistant',
-            content: fullResponse,
-          });
-
-          const finalMessages = await historyManagerRef.current.getHistory(state.conversationId);
-          setState(prev => ({ 
-            ...prev, 
-            messages: finalMessages, 
-            isStreaming: false, 
-            streamingContent: '' 
-          }));
-        } else if (event.type === 'error') {
-          unsubscribe();
-          setState(prev => ({ 
-            ...prev, 
-            error: event.error.message, 
-            isStreaming: false 
-          }));
-        }
+      } else if (event.type === 'error') {
+        unsubscribe();
+        
+        // Reload messages even on error
+        const errorMessages = await historyManagerRef.current.getHistory(state.conversationId);
+        setState(prev => ({ 
+          ...prev, 
+          messages: errorMessages,
+          error: event.error.message, 
+          isStreaming: false,
+          streamingContent: ''
+        }));
       }
-    } catch (error: any) {
+
+
+ 
+    }
+  } catch (error: any) {
+    // Reload messages on exception
+    try {
+      const errorMessages = await historyManagerRef.current.getHistory(state.conversationId);
+      setState(prev => ({ 
+        ...prev, 
+        messages: errorMessages,
+        error: error.message, 
+        isStreaming: false,
+        streamingContent: ''
+      }));
+    } catch {
       setState(prev => ({ 
         ...prev, 
         error: error.message, 
-        isStreaming: false 
+        isStreaming: false,
+        streamingContent: ''
       }));
     }
-  };
+  }
+};
 
   // Custom input handling
   useInput((input, key) => {
@@ -222,7 +291,7 @@ const ConversationalTUI: React.FC = () => {
     <Box flexDirection="column" padding={1}>
       {/* Header */}
       <Box borderStyle="round" borderColor="cyan" paddingX={2} marginBottom={1}>
-        <Text bold color="cyan">🤖 CC_Clone - Conversational Interface</Text>
+        <Text bold color="cyan">🤖 CC_Clone - Multi-Agent System</Text>
       </Box>
 
       {/* Status */}
@@ -250,6 +319,9 @@ const ConversationalTUI: React.FC = () => {
                   <Text color={msg.role === 'user' ? 'cyan' : 'white'}>
                     {getMessageIcon(msg.role)} {msg.role}
                   </Text>
+                  {msg.metadata?.agentId && (
+                    <Text color="gray" dimColor> • {msg.metadata.agentId}</Text>
+                  )}
                 </Box>
                 <Text>{msg.content || ' '}</Text>
               </Box>
@@ -286,10 +358,22 @@ const ConversationalTUI: React.FC = () => {
         </Box>
       )}
 
+      {/* Agents */}
+      <Box marginBottom={1}>
+        <Text color="gray">Status: </Text>
+        <Text color={state.error ? 'red' : 'green'}>{state.status}</Text>
+        {state.activeAgents > 0 && (
+          <>
+            <Text color="gray"> • Agents: </Text>
+            <Text color="yellow">{state.activeAgents} active</Text>
+          </>
+        )}
+      </Box>
+
       {/* Help */}
       <Box marginTop={1}>
         <Text dimColor color="gray">
-          Type your message and press Enter • Ctrl+C to exit
+          Type your message or /help for commands • Enter to send • Ctrl+C to exit
         </Text>
       </Box>
     </Box>
