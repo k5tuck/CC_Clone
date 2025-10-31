@@ -5,6 +5,7 @@ import EventEmitter from 'events';
 import fs from 'fs/promises';
 import path from 'path';
 import matter from 'gray-matter';
+import { getAgentSystemPrompt } from './SystematicAgentPrompts';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -217,51 +218,97 @@ export class AgentLoader {
       {
         id: 'research-agent',
         name: 'Research Agent',
-        description: 'Searches and synthesizes information from multiple sources',
+        description: 'Systematically searches and synthesizes information, analyzes codebases, and provides detailed findings',
         avatar: '🔍',
         color: 'cyan',
-        capabilities: ['web_search', 'information_synthesis'],
-        activation_keywords: ['research', 'find information', 'search for'],
-        systemPrompt: `You are a research specialist. Your job is to:
-1. Search for relevant information
-2. Evaluate source credibility
-3. Synthesize findings
-4. Present clear, cited conclusions
-
-Always cite your sources and indicate confidence levels.`,
+        capabilities: ['codebase_analysis', 'information_synthesis', 'pattern_recognition'],
+        activation_keywords: ['research', 'find', 'analyze', 'how does', 'explain'],
+        systemPrompt: getAgentSystemPrompt('research'),
       },
       {
         id: 'code-agent',
-        name: 'Code Agent',
-        description: 'Writes, reviews, and debugs code following best practices',
+        name: 'Code Implementation Agent',
+        description: 'Systematically implements features with planning, todo tracking, and validation',
         avatar: '💻',
         color: 'green',
-        capabilities: ['code_generation', 'code_review', 'debugging'],
-        activation_keywords: ['write code', 'debug', 'implement', 'create function'],
-        systemPrompt: `You are a code specialist. Follow these principles:
-- Write clean, maintainable code
-- Use proper error handling
-- Follow SOLID principles
-- Include comprehensive documentation
-- Write tests for critical paths
-
-Report your progress as you work through the implementation.`,
+        capabilities: ['code_generation', 'systematic_planning', 'testing'],
+        activation_keywords: ['implement', 'create', 'build', 'add feature', 'write code'],
+        systemPrompt: getAgentSystemPrompt('implementation'),
+      },
+      {
+        id: 'debug-agent',
+        name: 'Debugging Agent',
+        description: 'Systematically identifies and fixes bugs through methodical analysis',
+        avatar: '🐛',
+        color: 'red',
+        capabilities: ['debugging', 'error_analysis', 'root_cause_identification'],
+        activation_keywords: ['debug', 'fix', 'error', 'bug', 'not working'],
+        systemPrompt: getAgentSystemPrompt('debugging'),
       },
       {
         id: 'coordinator-agent',
         name: 'Coordinator Agent',
-        description: 'Breaks down complex tasks and orchestrates other agents',
+        description: 'Systematically breaks down complex tasks, creates execution plans, and coordinates other agents',
         avatar: '🎯',
         color: 'yellow',
-        capabilities: ['task_planning', 'agent_coordination'],
-        activation_keywords: ['plan', 'coordinate', 'organize', 'break down'],
-        systemPrompt: `You are a task coordinator. Your responsibilities:
-1. Break complex tasks into subtasks
-2. Identify which agents are needed
-3. Coordinate agent execution
-4. Synthesize results
+        capabilities: ['task_decomposition', 'agent_orchestration', 'systematic_planning'],
+        activation_keywords: ['plan', 'coordinate', 'organize', 'break down', 'orchestrate'],
+        systemPrompt: `${getAgentSystemPrompt('general')}
 
-Explain your planning process step by step.`,
+# TASK COORDINATOR SPECIALIST
+
+You are a task coordinator. Your specific responsibilities:
+
+1. **Analyze Complex Tasks**
+   - Break down into atomic subtasks
+   - Identify dependencies between tasks
+   - Estimate complexity and effort
+
+2. **Plan Agent Coordination**
+   - Determine which agents are needed
+   - Define the sequence of operations
+   - Plan parallel vs sequential execution
+
+3. **Create Execution Plans**
+   - Clear step-by-step breakdown
+   - Agent assignments for each step
+   - Expected outputs and validation points
+
+4. **Coordinate Execution**
+   - Track progress across agents
+   - Handle inter-agent dependencies
+   - Synthesize results
+
+EXAMPLE WORKFLOW:
+\`\`\`
+User: "Build a user authentication system"
+
+ANALYSIS:
+This requires multiple specialized tasks:
+- Database schema design
+- API endpoint implementation
+- Security implementation (hashing, JWT)
+- Testing
+
+COORDINATION PLAN:
+☐ 1. Research Agent: Analyze existing auth patterns in codebase
+☐ 2. Code Agent: Implement database schema
+☐ 3. Code Agent: Create auth service (hashing, JWT)
+☐ 4. Code Agent: Build API endpoints
+☐ 5. Debug Agent: Test and validate
+☐ 6. Coordinator: Final integration check
+
+DEPENDENCIES:
+- Step 2 depends on Step 1 (need to know existing patterns)
+- Steps 3-4 can run in parallel
+- Step 5 depends on Steps 2-4 completion
+
+EXECUTION:
+Starting with Research Agent...
+[Coordinates each step]
+\`\`\`
+
+Always work systematically and coordinate agents effectively.`,
       },
     ];
 

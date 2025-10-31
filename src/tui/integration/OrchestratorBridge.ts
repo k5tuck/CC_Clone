@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { MultiAgentOrchestrator, TaskRequest } from '../../lib/orchestrator/multi-agent-orchestrator';
 import { StreamingClient, StreamEvent } from '../../lib/streaming/StreamingClient';
 import { ConversationHistoryManager, Message } from '../../lib/history/ConversationHistoryManager';
+import fs from 'fs/promises';
 
 export type IntentType = 'task' | 'query' | 'command';
 
@@ -184,10 +185,41 @@ export class OrchestratorBridge {
       // Build response
       let response = `✅ Task analysis complete!\n\n`;
       response += `**Agents Assigned:**\n`;
-      
-      for (const [agentId, plan] of Object.entries(result.plans)) {
+
+      for (const [agentId, planFile] of Object.entries(result.plans)) {
         response += `\n🤖 **${agentId}**\n`;
-        response += `${plan}\n`;
+        response += `📄 Plan file: \`${planFile}\`\n\n`;
+
+        // Read and display plan content
+        try {
+          const planContent = await fs.readFile(planFile, 'utf-8');
+
+          // Extract implementation steps section
+          const lines = planContent.split('\n');
+          const stepsStartIdx = lines.findIndex(l =>
+            l.toLowerCase().includes('## implementation') ||
+            l.toLowerCase().includes('## steps') ||
+            l.toLowerCase().includes('## plan')
+          );
+
+          if (stepsStartIdx >= 0) {
+            // Find next section or take next 30 lines
+            let stepsEndIdx = lines.findIndex((l, i) =>
+              i > stepsStartIdx + 1 && l.startsWith('##')
+            );
+            if (stepsEndIdx === -1) stepsEndIdx = Math.min(lines.length, stepsStartIdx + 30);
+
+            const stepsContent = lines.slice(stepsStartIdx, stepsEndIdx).join('\n');
+            response += `**Plan Preview:**\n${stepsContent}\n\n`;
+          } else {
+            // No clear steps section, show first 500 chars
+            response += `**Plan Preview:**\n${planContent.substring(0, 500)}...\n\n`;
+          }
+
+          response += `*Type \`/view-plan ${agentId}\` to see full plan*\n`;
+        } catch (error: any) {
+          response += `⚠️  Could not read plan file: ${error.message}\n`;
+        }
       }
 
       yield { type: 'token', data: response };
@@ -402,11 +434,37 @@ private async *handleSpawnCommand(
     let response = `✅ Agent spawned successfully!\n\n`;
     response += `**Agent:** ${agentType}\n`;
     response += `**Task:** ${task}\n\n`;
-    response += `**Plan:**\n`;
-    
-    for (const [agentId, plan] of Object.entries(result.plans)) {
+
+    for (const [agentId, planFile] of Object.entries(result.plans)) {
       response += `\n🤖 **${agentId}**\n`;
-      response += `${plan}\n`;
+      response += `📄 Plan file: \`${planFile}\`\n\n`;
+
+      // Read and display plan content
+      try {
+        const planContent = await fs.readFile(planFile, 'utf-8');
+
+        // Extract key sections
+        const lines = planContent.split('\n');
+        const stepsStartIdx = lines.findIndex(l =>
+          l.toLowerCase().includes('## implementation') ||
+          l.toLowerCase().includes('## steps') ||
+          l.toLowerCase().includes('## plan')
+        );
+
+        if (stepsStartIdx >= 0) {
+          let stepsEndIdx = lines.findIndex((l, i) =>
+            i > stepsStartIdx + 1 && l.startsWith('##')
+          );
+          if (stepsEndIdx === -1) stepsEndIdx = Math.min(lines.length, stepsStartIdx + 25);
+
+          const stepsContent = lines.slice(stepsStartIdx, stepsEndIdx).join('\n');
+          response += `**Plan:**\n${stepsContent}\n\n`;
+        } else {
+          response += `**Plan:**\n${planContent.substring(0, 400)}...\n\n`;
+        }
+      } catch (error: any) {
+        response += `⚠️  Could not read plan: ${error.message}\n`;
+      }
     }
 
     yield { type: 'token', data: response };

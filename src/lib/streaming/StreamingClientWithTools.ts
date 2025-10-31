@@ -122,72 +122,65 @@ export class StreamingClientWithTools {
     while (iteration < this.maxIterations) {
       iteration++;
 
+      // Stream response and collect content
+      let fullContent = '';
+      let toolCalls: ToolCall[] = [];
+
       // Check if model supports tool calling
-      let response: { content: string; toolCalls?: ToolCall[] };
-      
       if (this.toolSchemas.length > 0 && this.streamingClient.chatWithTools) {
         // Try to get tool calls from the model
         try {
-          response = await this.streamingClient.chatWithTools(
+          const response = await this.streamingClient.chatWithTools(
             conversationMessages,
             this.toolSchemas
           );
+          fullContent = response.content;
+          toolCalls = response.toolCalls || [];
+
+          // Stream the content token by token
+          const words = fullContent.split(/(\s+)/);
+          for (const word of words) {
+            if (word) {
+              yield { type: 'token', data: word };
+              // Small delay for smooth streaming
+              await new Promise(resolve => setTimeout(resolve, 5));
+            }
+          }
         } catch (error) {
-          // Fallback to regular chat if tool calling not supported
-          console.warn('[StreamingTools] Tool calling not supported, falling back to regular chat');
-        //   const stream = this.streamingClient.stream(conversationMessages);
-        //     response = {
-        //     content: await streamToString(stream),
-        //     toolCalls: []
-        //     };
-          response = {
-            content: await this.streamingClient.stream(conversationMessages),
-            toolCalls: []
-          };
+          // Fallback to regular streaming if tool calling not supported
+          console.warn('[StreamingTools] Tool calling not supported, falling back to streaming');
+
+          const stream = this.streamingClient.stream(conversationMessages);
+          for await (const event of stream) {
+            if (event.type === 'token') {
+              fullContent += event.data;
+              yield { type: 'token', data: event.data };
+            }
+          }
+          toolCalls = [];
         }
       } else {
-        // No tools registered or chatWithTools not available, use regular chat
-        response = {
-          content: await this.streamingClient.stream(conversationMessages),
-          toolCalls: []
-        };
+        // No tools registered, use regular streaming
+        const stream = this.streamingClient.stream(conversationMessages);
+        for await (const event of stream) {
+          if (event.type === 'token') {
+            fullContent += event.data;
+            yield { type: 'token', data: event.data };
+          }
+        }
+        toolCalls = [];
       }
 
-      // Stream the response content token by token
-    //   const tokens = response.content.split(/(\s+)/);
-
-    //   for (const token of tokens) {
-    //     if (token) {
-    //       yield { type: 'token', data: token };
-    //       // Small delay to simulate streaming
-    //       await new Promise(resolve => setTimeout(resolve, 10));
-    //     }
-    //   }
-
-    const stream = this.streamingClient.stream(conversationMessages);
-
-    // Correct: iterate over streaming events
-    for await (const event of stream) {
-        if (event.type === 'token') {
-            yield { type: 'token', data: event.data };
-        } else if (event.type === 'tool_call') {
-            yield { type: 'tool_call', toolCall: event.toolCall };
-        } else if (event.type === 'tool_result') {
-            yield { type: 'tool_result', toolName: event.toolName, result: event.result };
-        }
-    }
-
-
       // If no tool calls, we're done
-      if (!response.toolCalls || response.toolCalls.length === 0) {
+      if (!toolCalls || toolCalls.length === 0) {
         yield { type: 'done' };
         return;
       }
 
       // Execute tool calls automatically
       const toolResults: Record<string, any> = {};
-      
-      for (const toolCall of response.toolCalls) {
+
+      for (const toolCall of toolCalls) {
         // Notify about tool call
         yield { type: 'tool_call', toolCall };
         onToolCall?.(toolCall);
@@ -195,18 +188,18 @@ export class StreamingClientWithTools {
         try {
           const result = await this.executeTool(toolCall);
           toolResults[toolCall.name] = result;
-          
+
           // Notify about tool result
           yield { type: 'tool_result', toolName: toolCall.name, result };
           onToolResult?.(toolCall.name, result);
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           toolResults[toolCall.name] = { error: errorMessage };
-          
-          yield { 
-            type: 'tool_result', 
-            toolName: toolCall.name, 
-            result: { error: errorMessage } 
+
+          yield {
+            type: 'tool_result',
+            toolName: toolCall.name,
+            result: { error: errorMessage }
           };
         }
       }
@@ -214,7 +207,7 @@ export class StreamingClientWithTools {
       // Add assistant response to conversation
       conversationMessages.push({
         role: 'assistant',
-        content: response.content,
+        content: fullContent,
       });
 
       // Add tool results to conversation

@@ -17,7 +17,9 @@ import {
   getAgentOrchestrator,
 } from '../../src/lib/agents/AgentSystem';
 import { getSkillManager } from '@/lib/skills/SkillManager';
+import { MCPClientManager } from '../mcp/mcp-client';
 import * as dotenv from 'dotenv';
+import fs from 'fs/promises';
 
 dotenv.config();
 import { createProjectContext } from '../lib/context/ProjectContextLoader';
@@ -63,6 +65,11 @@ interface AppState {
     keywords: string;
     systemPrompt: string;
   }>;
+
+  // Autocomplete state
+  suggestions: string[];
+  selectedSuggestion: number;
+  showSuggestions: boolean;
 }
 
 // ============================================================================
@@ -405,6 +412,9 @@ const ConversationalTUI: React.FC = () => {
     showAgentCreator: false,
     creatorStep: 'idle',
     creatorData: {},
+    suggestions: [],
+    selectedSuggestion: 0,
+    showSuggestions: false,
   });
 
   const orchestratorRef = useRef<MultiAgentOrchestrator | null>(null);
@@ -415,6 +425,7 @@ const ConversationalTUI: React.FC = () => {
   const agentOrchestratorRef = useRef<AgentOrchestrator | null>(null);
   const agentCreatorRef = useRef<AgentCreator | null>(null);
   const skillManagerRef = useRef<ReturnType<typeof getSkillManager> | null>(null);
+  const mcpManagerRef = useRef<MCPClientManager | null>(null);
   const mountedRef = useRef(true);
   const toolClientRef = useRef<StreamingClientWithTools | null>(null);
 
@@ -439,7 +450,54 @@ useEffect(() => {
       // Register all tools
       registerStandardTools(toolClientRef.current);
       console.log('[Tools] Registered:', toolClientRef.current.getAvailableTools());
-      
+
+      // Initialize MCP (Model Context Protocol) servers
+      try {
+        mcpManagerRef.current = new MCPClientManager();
+        const mcpConfigPath = './config/mcp-servers.json';
+
+        try {
+          await fs.access(mcpConfigPath);
+          const configContent = await fs.readFile(mcpConfigPath, 'utf-8');
+          const mcpConfig = JSON.parse(configContent);
+
+          console.log('[MCP] Loading servers from config...');
+
+          for (const server of mcpConfig.servers) {
+            try {
+              await mcpManagerRef.current.connectToServer(server);
+            } catch (error) {
+              console.warn(`[MCP] Failed to connect to ${server.name}:`, error);
+            }
+          }
+
+          // Register MCP tools with the tool client
+          const mcpTools = mcpManagerRef.current.getToolsForLLM();
+          console.log(`[MCP] Registering ${mcpTools.length} MCP tools`);
+
+          for (const tool of mcpTools) {
+            toolClientRef.current.registerTool(
+              tool.name,
+              async (params: Record<string, any>) => {
+                return await mcpManagerRef.current!.callTool(tool.name, params);
+              },
+              tool as any
+            );
+          }
+
+          const mcpStats = mcpManagerRef.current.getStats();
+          console.log(`[MCP] ✓ Loaded ${mcpStats.connectedServers} servers with ${mcpStats.totalTools} tools`);
+        } catch (error: any) {
+          if (error.code === 'ENOENT') {
+            console.log('[MCP] No mcp-servers.json found, skipping MCP initialization');
+          } else {
+            console.warn('[MCP] Failed to load MCP config:', error);
+          }
+        }
+      } catch (error) {
+        console.warn('[MCP] MCP initialization failed:', error);
+      }
+
       // Initialize history manager
       historyManagerRef.current = new ConversationHistoryManager();
       await historyManagerRef.current.initialize();
@@ -600,6 +658,13 @@ useEffect(() => {
     mountedRef.current = false;
     historyManagerRef.current?.close();
     bufferRef.current?.dispose();
+
+    // Cleanup MCP connections
+    if (mcpManagerRef.current) {
+      mcpManagerRef.current.disconnectAll().catch(error => {
+        console.warn('[MCP] Cleanup error:', error);
+      });
+    }
   };
 }, []);
 
@@ -621,6 +686,7 @@ useEffect(() => {
 /agent <id> <task> - Execute an agent
 /create-agent - Create a new agent
 /reload - Reload agents and skills
+/mcp - Show MCP servers and tools status
 /clear - Clear messages
 /help - Show this help`,
             } as Message,
@@ -680,6 +746,61 @@ useEffect(() => {
         setState(prev => ({ ...prev, messages: [], agentMessages: [] }));
         return true;
 
+      case '/mcp': {
+        if (!mcpManagerRef.current) {
+          setState(prev => ({
+            ...prev,
+            messages: [
+              ...prev.messages,
+              {
+                role: 'system',
+                content: '❌ MCP is not initialized',
+              } as Message,
+            ],
+          }));
+          return true;
+        }
+
+        const stats = mcpManagerRef.current.getStats();
+        const servers = mcpManagerRef.current.getConnectedServers();
+        const allTools = mcpManagerRef.current.getAllTools();
+
+        let mcpInfo = `**MCP Status**\n\n`;
+        mcpInfo += `✅ Connected Servers: ${stats.connectedServers}\n`;
+        mcpInfo += `🔧 Total Tools: ${stats.totalTools}\n\n`;
+
+        if (servers.length > 0) {
+          mcpInfo += `**Servers:**\n`;
+          for (const server of servers) {
+            const toolCount = stats.byServer[server] || 0;
+            mcpInfo += `  • ${server}: ${toolCount} tools\n`;
+          }
+
+          mcpInfo += `\n**Available Tools:**\n`;
+          for (const { name, serverName } of allTools.slice(0, 20)) {
+            mcpInfo += `  • ${name} (from ${serverName})\n`;
+          }
+
+          if (allTools.length > 20) {
+            mcpInfo += `  ... and ${allTools.length - 20} more\n`;
+          }
+        } else {
+          mcpInfo += `No servers connected. Add servers to config/mcp-servers.json\n`;
+        }
+
+        setState(prev => ({
+          ...prev,
+          messages: [
+            ...prev.messages,
+            {
+              role: 'system',
+              content: mcpInfo,
+            } as Message,
+          ],
+        }));
+        return true;
+      }
+
       default:
         return false;
     }
@@ -729,6 +850,63 @@ useEffect(() => {
       setState(prev => ({ ...prev, creatorStep: nextStep, creatorData: updatedData }));
     }
   };
+
+  // Generate autocomplete suggestions
+  const generateSuggestions = (input: string): string[] => {
+    if (!input.startsWith('/')) {
+      return [];
+    }
+
+    const commands = [
+      '/help',
+      '/agents',
+      '/skills',
+      '/mcp',
+      '/clear',
+      '/reload',
+      '/create-agent',
+    ];
+
+    // Add agent-specific commands
+    if (state.availableAgents.length > 0) {
+      for (const agent of state.availableAgents) {
+        commands.push(`/agent ${agent.id} `);
+      }
+    }
+
+    const matches = commands.filter(cmd =>
+      cmd.toLowerCase().startsWith(input.toLowerCase())
+    );
+
+    return matches.slice(0, 10); // Limit to 10 suggestions
+  };
+
+  // Update suggestions when input changes
+  useEffect(() => {
+    if (state.currentInput.startsWith('/') && state.currentInput.length > 1) {
+      const suggestions = generateSuggestions(state.currentInput);
+      if (suggestions.length > 0) {
+        setState(prev => ({
+          ...prev,
+          suggestions,
+          showSuggestions: true,
+          selectedSuggestion: 0,
+        }));
+      } else {
+        setState(prev => ({
+          ...prev,
+          suggestions: [],
+          showSuggestions: false,
+        }));
+      }
+    } else {
+      setState(prev => ({
+        ...prev,
+        suggestions: [],
+        showSuggestions: false,
+      }));
+    }
+  }, [state.currentInput, state.availableAgents]);
 
   const handleSubmit = async (): Promise<void> => {
     if (!state.currentInput.trim() || !state.conversationId) return;
@@ -909,6 +1087,47 @@ useEffect(() => {
     if (key.ctrl && (input === 'c' || input === 'd')) {
       exit();
       return;
+    }
+
+    // Handle autocomplete suggestions
+    if (state.showSuggestions && state.suggestions.length > 0) {
+      if (key.upArrow) {
+        setState(prev => ({
+          ...prev,
+          selectedSuggestion: Math.max(0, prev.selectedSuggestion - 1),
+        }));
+        return;
+      }
+      if (key.downArrow) {
+        setState(prev => ({
+          ...prev,
+          selectedSuggestion: Math.min(prev.suggestions.length - 1, prev.selectedSuggestion + 1),
+        }));
+        return;
+      }
+      if (key.tab) {
+        // Accept selected suggestion
+        const selected = state.suggestions[state.selectedSuggestion];
+        setState(prev => ({
+          ...prev,
+          currentInput: selected,
+          cursorPosition: selected.length,
+          showSuggestions: false,
+          suggestions: [],
+          selectedSuggestion: 0,
+        }));
+        return;
+      }
+      if (key.escape) {
+        // Dismiss suggestions
+        setState(prev => ({
+          ...prev,
+          showSuggestions: false,
+          suggestions: [],
+          selectedSuggestion: 0,
+        }));
+        return;
+      }
     }
 
     if (state.showAgentCreator && key.escape) {
@@ -1134,6 +1353,21 @@ useEffect(() => {
           cursorPosition={state.cursorPosition}
           isActive={!state.isStreaming}
         />
+      )}
+
+      {/* Autocomplete Suggestions */}
+      {state.showSuggestions && state.suggestions.length > 0 && (
+        <Box flexDirection="column" marginTop={0} borderStyle="round" borderColor="yellow" paddingX={1}>
+          <Text color="yellow" bold>💡 Suggestions (Tab to accept, ↑↓ to navigate, Esc to dismiss):</Text>
+          {state.suggestions.map((suggestion, idx) => (
+            <Box key={idx} paddingLeft={1}>
+              <Text color={idx === state.selectedSuggestion ? 'cyan' : 'gray'}>
+                {idx === state.selectedSuggestion ? '▶ ' : '  '}
+                {suggestion}
+              </Text>
+            </Box>
+          ))}
+        </Box>
       )}
 
       {/* Loading indicator */}
