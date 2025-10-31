@@ -5,7 +5,7 @@
 **Date**: 2025-10-29
 
 ## Executive Summary
-Transform CC_Clone from menu-driven to conversational architecture matching Claude Code's real-time chat interface.
+Transform Selek from menu-driven to conversational architecture matching Claude Code's real-time chat interface.
 
 ## Current State Analysis
 - Menu-based navigation using `ink-select-input`

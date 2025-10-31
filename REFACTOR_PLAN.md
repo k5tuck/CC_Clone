@@ -1,4 +1,4 @@
-# CC_Clone Comprehensive Refactoring Plan
+# Selek Comprehensive Refactoring Plan
 
 ## Current Folder Structure Analysis
 

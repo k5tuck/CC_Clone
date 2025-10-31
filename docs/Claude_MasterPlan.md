@@ -1,7 +1,7 @@
-# CC_Clone Conversational TUI Transformation
+# Selek Conversational TUI Transformation
 ## Master Implementation Plan
 
-**Project**: Convert CC_Clone from Menu-Driven to Conversational Interface  
+**Project**: Convert Selek from Menu-Driven to Conversational Interface  
 **Goal**: Create Claude Code-style interactive chat TUI  
 **Started**: 2025-10-29  
 **Status**: 🟢 PHASE 1 COMPLETE - READY FOR TESTING
@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-Transform the CC_Clone multi-agent system from a menu-driven interface to a real-time conversational TUI matching Claude Code's user experience. This involves implementing streaming responses, conversation history management, and seamless integration with the existing MultiAgentOrchestrator.
+Transform the Selek multi-agent system from a menu-driven interface to a real-time conversational TUI matching Claude Code's user experience. This involves implementing streaming responses, conversation history management, and seamless integration with the existing MultiAgentOrchestrator.
 
 ### Key Objectives
 - [x] ✅ Create architectural plans
@@ -511,7 +511,7 @@ npm run import -- <file.json>
 ## Contact & Support
 
 **Project Lead**: Kyle Tucker  
-**Repository**: https://github.com/k5tuck/CC_Clone  
+**Repository**: https://github.com/k5tuck/Selek  
 **Issues**: File on GitHub  
 **Discussions**: GitHub Discussions
 
@@ -558,4 +558,4 @@ type StreamEvent =
 
 ---
 
-*This document is maintained by all agents and serves as the single source of truth for the CC_Clone conversational TUI project.*
+*This document is maintained by all agents and serves as the single source of truth for the Selek conversational TUI project.*

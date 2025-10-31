@@ -2,7 +2,7 @@
 name: code-generator
 version: 1.0.0
 description: Generates production-ready code with proper error handling, type safety, SOLID principles, and comprehensive documentation
-author: CC_Clone Team
+author: Selek Team
 tags: [code, typescript, javascript, python, generator, solid]
 activation_keywords:
   - write code

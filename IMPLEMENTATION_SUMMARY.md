@@ -1,4 +1,4 @@
-# CC_Clone Implementation Summary
+# Selek Implementation Summary
 
 ## ✅ **Completed Features (Phase 1-2)**
 
@@ -389,7 +389,7 @@ console.log(results);
 ## 📝 **Commit Message**
 
 ```
-feat: Major improvements to CC_Clone - MCP, autocomplete, agent management
+feat: Major improvements to Selek - MCP, autocomplete, agent management
 
 Phase 1 Improvements:
 - ✅ Fix MCP integration - now actually works in TUI

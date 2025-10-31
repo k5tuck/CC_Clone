@@ -104,7 +104,7 @@ async function main() {
   }
 
   // Build system prompt with project context
-  const baseSystemPrompt = `You are CC_Clone, a helpful AI coding assistant with access to powerful tools.
+  const baseSystemPrompt = `You are Selek, a helpful AI coding assistant with access to powerful tools.
 
 You can:
 - Read and write files
@@ -131,7 +131,7 @@ Be helpful, clear, and thorough. Always consider the project context when making
 
   // Create agent
   const agentMeta: AgentMeta = {
-    name: 'CC_Clone_Chat',
+    name: 'Selek_Chat',
     role: 'implementation',
     systemPrompt: enhancedSystemPrompt,
   };

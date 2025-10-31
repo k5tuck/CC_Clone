@@ -13,9 +13,9 @@ dotenv.config();
 const program = new Command();
 
 program
-  .name('local-agent')
-  .description('Claude Code Clone - Multi-Agent Orchestration System')
-  .version('1.0.0');
+  .name('selek')
+  .description('Selek - Systematic Multi-Agent AI Platform')
+  .version('2.0.0');
 
 /**
  * Initialize orchestrator command

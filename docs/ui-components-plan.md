@@ -139,7 +139,7 @@ interface StreamingMessageProps {
 #### Design
 ```
 ╔══════════════════════════════════════════════════════╗
-║  🤖 CC_Clone - Conversational Multi-Agent System     ║
+║  🤖 Selek - Conversational Multi-Agent System     ║
 ║  Type /help for commands                             ║
 ╚══════════════════════════════════════════════════════╝
 ```

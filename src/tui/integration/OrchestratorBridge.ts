@@ -561,7 +561,7 @@ private inferDomainFromType(agentType: string): string {
  */
 private getHelpText(): string {
   return `
-📖 **CC_Clone Help**
+📖 **Selek Help**
 
 **Available Commands:**
 - /help - Show this help message

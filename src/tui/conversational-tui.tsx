@@ -105,7 +105,7 @@ const ConversationalTUI: React.FC = () => {
         // Add enhanced system message
         await historyManager.saveMessage(conversationId, {
           role: 'system',
-          content: `You are CC_Clone, an AI assistant with a multi-agent orchestration system.
+          content: `You are Selek, an AI assistant with a multi-agent orchestration system.
 
         **Available Capabilities:**
         - Spawn specialized agents for complex tasks:
@@ -291,7 +291,7 @@ const ConversationalTUI: React.FC = () => {
     <Box flexDirection="column" padding={1}>
       {/* Header */}
       <Box borderStyle="round" borderColor="cyan" paddingX={2} marginBottom={1}>
-        <Text bold color="cyan">🤖 CC_Clone - Multi-Agent System</Text>
+        <Text bold color="cyan">🤖 Selek - Multi-Agent System</Text>
       </Box>
 
       {/* Status */}
@@ -588,7 +588,7 @@ render(<ConversationalTUI />);
 //     <Box flexDirection="column" padding={1}>
 //       {/* Header */}
 //       <Box borderStyle="round" borderColor="cyan" paddingX={2} marginBottom={1}>
-//         <Text bold color="cyan">🤖 CC_Clone - Conversational Interface</Text>
+//         <Text bold color="cyan">🤖 Selek - Conversational Interface</Text>
 //       </Box>
 
 //       {/* Status */}

@@ -36,7 +36,7 @@ export class MCPClientManager {
 
       const client = new Client(
         {
-          name: 'cc-clone-agent',
+          name: 'selek-agent',
           version: '1.0.0',
         },
         {

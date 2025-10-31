@@ -339,7 +339,7 @@ Conversations:
     <Box flexDirection="column" padding={1}>
       <Box marginBottom={1}>
         <Text bold color="cyan">
-          🤖 CC_Clone Multi-Agent System - TUI
+          🤖 Selek Multi-Agent System - TUI
         </Text>
       </Box>
 

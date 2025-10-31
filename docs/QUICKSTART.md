@@ -1,6 +1,6 @@
 # 🚀 Quick Start Guide
 
-Get your CC_Clone multi-agent system up and running in 5 minutes!
+Get your Selek multi-agent system up and running in 5 minutes!
 
 ## Step 1: Prerequisites Check
 
@@ -19,8 +19,8 @@ curl http://localhost:11434/api/tags
 
 ```bash
 # Clone the repo (if not already done)
-git clone https://github.com/k5tuck/CC_Clone.git
-cd CC_Clone
+git clone https://github.com/k5tuck/Selek.git
+cd Selek
 
 # Install packages
 pnpm install
@@ -435,8 +435,8 @@ npm run cli spawn \
 ## Getting Help
 
 - **Documentation**: See README.md
-- **Issues**: https://github.com/k5tuck/CC_Clone/issues
-- **Discussions**: https://github.com/k5tuck/CC_Clone/discussions
+- **Issues**: https://github.com/k5tuck/Selek/issues
+- **Discussions**: https://github.com/k5tuck/Selek/discussions
 
 ---
 
