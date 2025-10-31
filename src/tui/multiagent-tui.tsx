@@ -8,6 +8,7 @@ import { ResponseBuffer } from '../lib/streaming/ResponseBuffer';
 import { ConversationHistoryManager, Message } from '../lib/history/ConversationHistoryManager';
 import { getSkillAwareAgent, SkillAwareAgent } from '../lib/agents/SkillAwareAgent';
 import { createStreamingProviderAdapter } from '../lib/providers/StreamingClientAdapter';
+import { StreamingClientWithTools, registerStandardTools } from '../lib/streaming/StreamingClientWithTools';
 import {
   AgentOrchestrator,
   AgentStatus,
@@ -19,6 +20,7 @@ import { getSkillManager } from '@/lib/skills/SkillManager';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
+import { createProjectContext } from '../lib/context/ProjectContextLoader';
 
 // ============================================================================
 // TYPES
@@ -210,16 +212,16 @@ const MessageBubble: React.FC<{ message: Message }> = ({ message }) => {
   return (
     <Box flexDirection="column" marginY={1}>
       <Box>
-        <Text bold color={isUser ? 'cyan' : 'green'}>
+        <Text bold color={isUser ? 'cyan' : '#E26313'}>
           {isUser ? '▯ ' : '◆ '}
-          {message.role}
+          {message.role.toUpperCase()}
         </Text>
-        {message.metadata?.agentId && (
+            {message.metadata?.agentId && (
           <Text color="gray" dimColor> • {message.metadata.agentId}</Text>
         )}
       </Box>
       <Box paddingLeft={2}>
-        <Text color={isUser ? 'white' : 'gray'}>
+        <Text color={isUser ? 'white' : 'white'}>
           {message.content || ' '}
         </Text>
       </Box>
@@ -240,15 +242,15 @@ const StreamingMessage: React.FC<{ content: string }> = ({ content }) => {
   return (
     <Box flexDirection="column" marginY={1}>
       <Box>
-        <Text bold color="green">
+        <Text bold color="#CD853F">
           ◆ assistant
         </Text>
-        <Text color="gray" dimColor> (streaming...)</Text>
+        <Text color="white"> (streaming...)</Text>
       </Box>
       <Box paddingLeft={2}>
-        <Text color="gray">
+        <Text color="white">
           {content || ' '}
-          {showCursor && <Text color="green">█</Text>}
+          {showCursor && <Text color="#CD853F">█</Text>}
         </Text>
       </Box>
     </Box>
@@ -282,15 +284,14 @@ const InputPrompt: React.FC<{
     <Box flexDirection="column" marginTop={1}>
       <Box borderStyle="round" borderColor="cyan" paddingX={1} paddingY={0}>
         <Text color="cyan" bold>▯ </Text>
-        <Text>
-          {beforeCursor}
-          {isActive && showCursor ? (
-            <Text backgroundColor="cyan" color="black">{atCursor}</Text>
-          ) : (
-            <Text>{atCursor}</Text>
-          )}
-          {afterCursor}
-        </Text>
+        {/* CHANGED: Split into separate Text components with explicit colors */}
+        <Text color="white">{beforeCursor}</Text>
+        {isActive && showCursor ? (
+          <Text backgroundColor="cyan" color="black">{atCursor}</Text>
+        ) : (
+          <Text color="white">{atCursor}</Text>
+        )}
+        <Text color="white">{afterCursor}</Text>
       </Box>
     </Box>
   );
@@ -325,7 +326,7 @@ const StatusBar: React.FC<{
   };
 
   return (
-    <Box borderStyle="round" borderColor={getStatusColor()} paddingX={1} marginBottom={1}>
+    <Box borderStyle="round" borderColor='#FEFFF1' paddingX={1} marginBottom={1}>
       <Text color={getStatusColor()}>● </Text>
       <Text color={getStatusColor()}>{getStatusText()}</Text>
       {agentCount > 0 && (
@@ -372,7 +373,7 @@ const AgentCreatorUI: React.FC<{
           <Text color="cyan">█</Text>
         </Box>
         <Box marginTop={1}>
-          <Text color="gray" dimColor>Press Enter to continue • Esc to cancel</Text>
+          <Text color="white" dimColor>Press Enter to continue • Esc to cancel</Text>
         </Box>
       </Box>
     </Box>
@@ -415,6 +416,7 @@ const ConversationalTUI: React.FC = () => {
   const agentCreatorRef = useRef<AgentCreator | null>(null);
   const skillManagerRef = useRef<ReturnType<typeof getSkillManager> | null>(null);
   const mountedRef = useRef(true);
+  const toolClientRef = useRef<StreamingClientWithTools | null>(null);
 
   // Initialize system
 useEffect(() => {
@@ -427,6 +429,16 @@ useEffect(() => {
 
       // Initialize streaming client
       streamingClientRef.current = new StreamingClient(endpoint, model);
+
+      // Initialize tool-enabled streaming client
+      toolClientRef.current = new StreamingClientWithTools(
+        streamingClientRef.current as any,
+        10 // max iterations for tool calling loop
+      );
+
+      // Register all tools
+      registerStandardTools(toolClientRef.current);
+      console.log('[Tools] Registered:', toolClientRef.current.getAvailableTools());
       
       // Initialize history manager
       historyManagerRef.current = new ConversationHistoryManager();
@@ -501,35 +513,56 @@ useEffect(() => {
         `Chat ${new Date().toLocaleString()}`
       );
 
+      let projectContext = '';
+      try {
+        projectContext = await createProjectContext(process.cwd());
+        console.log('[ProjectContext] Loaded project structure');
+      } catch (error) {
+        console.warn('[ProjectContext] Failed to load project context:', error);
+        projectContext = 'Project context unavailable.';
+}
+
       // Add enhanced system message
       await historyManagerRef.current.saveMessage(conversationId, {
         role: 'system',
         content: `You are CC_Clone, an AI assistant with a multi-agent orchestration system.
 
-**Available Capabilities:**
-- Spawn specialized agents for complex tasks
-- Execute bash commands safely
-- Read, write, and search files in the codebase
-- Answer questions and provide guidance
-- Utilize ${skillManager.getSkillCount()} specialized skills
+        **Available Capabilities:**
+        - Spawn specialized agents for complex tasks
+        - Execute bash commands safely
+        - Read, write, and search files in the codebase
+        - Answer questions and provide guidance
+        - Utilize ${skillManager.getSkillCount()} specialized skills
 
-**Available Commands:**
-/help - Show detailed help and available commands
-/agents - List currently active agents and their status
-/skills - Show available skills
-/spawn <type> <task> - Manually spawn an agent
-/create-agent - Create a new custom agent
-/reload - Reload agents and skills
-/clear - Clear conversation history
-/stats - Show conversation and system statistics
+        **Available Commands:**
+        /help - Show detailed help and available commands
+        /agents - List currently active agents and their status
+        /skills - Show available skills
+        /spawn <type> <task> - Manually spawn an agent
+        /create-agent - Create a new custom agent
+        /reload - Reload agents and skills
+        /clear - Clear conversation history
+        /stats - Show conversation and system statistics
 
-**How to Use:**
-- Ask questions naturally, and I'll answer directly
-- Request implementation work and I'll coordinate agents
-- Use commands starting with / for system actions
+        **How to Use:**
+        - Ask questions naturally, and I'll answer directly
+        - Request implementation work and I'll coordinate agents
+        - Use commands starting with / for system actions
 
-I will automatically coordinate specialized agents when needed for complex tasks.`,
-      });
+        I will automatically coordinate specialized agents when needed for complex tasks.
+
+        ---
+
+        # CURRENT PROJECT CONTEXT
+
+        ${projectContext}
+
+        ---
+
+        **Important:** When you're asked about "this project", "the current codebase", or similar, 
+        you now have the project structure above as context. Use the file tools (readFile, searchFiles, blobSearch) 
+        to read specific files when you need more details.`,
+        });
 
       const messages = await historyManagerRef.current.getHistory(conversationId);
       const agents = agentOrchestrator.listAgents();
@@ -700,6 +733,7 @@ I will automatically coordinate specialized agents when needed for complex tasks
   const handleSubmit = async (): Promise<void> => {
     if (!state.currentInput.trim() || !state.conversationId) return;
     if (!bridgeRef.current || !historyManagerRef.current || !bufferRef.current) return;
+  if (!toolClientRef.current) return;
 
     const userMessage = state.currentInput.trim();
 
@@ -719,99 +753,153 @@ I will automatically coordinate specialized agents when needed for complex tasks
       }
     }
 
-    setState(prev => ({ 
-      ...prev, 
-      currentInput: '', 
-      cursorPosition: 0,
-      isStreaming: true, 
-      streamingContent: '',
-      status: 'streaming',
-      error: null,
-    }));
+ setState(prev => ({ 
+    ...prev, 
+    currentInput: '', 
+    cursorPosition: 0,
+    isStreaming: true, 
+    streamingContent: '',
+    status: 'streaming',
+    error: null,
+  }));
 
-    try {
-      let fullResponse = '';
-      const buffer = bufferRef.current;
-      let isFirstToken = true;
+  try {
+    // Save user message
+    await historyManagerRef.current.saveMessage(state.conversationId, {
+      role: 'user',
+      content: userMessage,
+    });
 
-      const unsubscribe = buffer.onFlush((text: string) => {
-        fullResponse += text;
+    // Get conversation history
+    const history = await historyManagerRef.current.getHistory(state.conversationId);
+    
+    let fullResponse = '';
+    const buffer = bufferRef.current;
+    let isFirstToken = true;
+
+    const unsubscribe = buffer.onFlush((text: string) => {
+      fullResponse += text;
+      if (mountedRef.current) {
+        setState(prev => ({ ...prev, streamingContent: fullResponse }));
+      }
+    });
+
+    // REPLACED: Use tool-aware streaming
+    for await (const event of toolClientRef.current.streamChatWithTools(
+      history,
+      // On tool call callback
+      (toolCall) => {
+        console.log('[Tool] Calling:', toolCall.name, toolCall.arguments);
+        if (mountedRef.current) {
+          setState(prev => ({
+            ...prev,
+            agentMessages: [
+              ...prev.agentMessages.slice(-30),
+              {
+                agentId: 'system',
+                agentName: 'Tool System',
+                type: 'action',
+                content: `Calling tool: ${toolCall.name}`,
+                timestamp: new Date(),
+              }
+            ],
+          }));
+        }
+      },
+      // On tool result callback
+      (toolName, result) => {
+        console.log('[Tool] Result from:', toolName, result);
+        if (mountedRef.current) {
+          setState(prev => ({
+            ...prev,
+            agentMessages: [
+              ...prev.agentMessages.slice(-30),
+              {
+                agentId: 'system',
+                agentName: 'Tool System',
+                type: 'result',
+                content: `Tool ${toolName} completed`,
+                timestamp: new Date(),
+              }
+            ],
+          }));
+        }
+      }
+    )) {
+      if (!mountedRef.current) {
+        unsubscribe();
+        break;
+      }
+
+      if (event.type === 'token') {
+        if (isFirstToken) {
+          isFirstToken = false;
+        }
+        buffer.append(event.data);
+      } else if (event.type === 'tool_call') {
+        // Tool is being called - show in UI
+        buffer.flush();
+        fullResponse += `\n\n[🔧 Using tool: ${event.toolCall.name}]\n\n`;
         if (mountedRef.current) {
           setState(prev => ({ ...prev, streamingContent: fullResponse }));
         }
-      });
-
-      for await (const event of bridgeRef.current.processMessage(state.conversationId, userMessage)) {
-        if (!mountedRef.current) {
-          unsubscribe();
-          break;
-        }
-
-        if (event.type === 'token') {
-          if (isFirstToken) {
-            const updatedMessages = await historyManagerRef.current.getHistory(state.conversationId);
-            setState(prev => ({ ...prev, messages: updatedMessages }));
-            isFirstToken = false;
-          }
-          buffer.append(event.data);
-        } else if (event.type === 'done') {
-          buffer.flush();
-          unsubscribe();
-          
-          await new Promise(resolve => setTimeout(resolve, 100));
-          
-          const finalMessages = await historyManagerRef.current.getHistory(state.conversationId);
-          
-          if (mountedRef.current) {
-            setState(prev => ({ 
-              ...prev, 
-              messages: finalMessages, 
-              isStreaming: false, 
-              streamingContent: '',
-              status: 'ready',
-            }));
-          }
-        } else if (event.type === 'error') {
-          unsubscribe();
-          
-          const errorMessages = await historyManagerRef.current.getHistory(state.conversationId);
-          
-          if (mountedRef.current) {
-            setState(prev => ({ 
-              ...prev,
-              messages: errorMessages,
-              error: event.error?.message || 'Stream error', 
-              isStreaming: false,
-              status: 'error',
-            }));
-          }
-        }
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
-      try {
-        const errorMessages = await historyManagerRef.current.getHistory(state.conversationId);
+      } else if (event.type === 'tool_result') {
+        // Tool completed - show brief result
+        const resultPreview = JSON.stringify(event.result).slice(0, 100);
+        fullResponse += `[✓ ${event.toolName}: ${resultPreview}...]\n\n`;
         if (mountedRef.current) {
-          setState(prev => ({ 
-            ...prev,
-            messages: errorMessages,
-            error: errorMessage, 
-            isStreaming: false,
-            status: 'error',
-          }));
+          setState(prev => ({ ...prev, streamingContent: fullResponse }));
         }
-      } catch {
+      } else if (event.type === 'done') {
+        buffer.flush();
+        unsubscribe();
+        
+        // Save assistant response
+        await historyManagerRef.current.saveMessage(state.conversationId, {
+          role: 'assistant',
+          content: fullResponse,
+        });
+        
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const finalMessages = await historyManagerRef.current.getHistory(state.conversationId);
+        
         if (mountedRef.current) {
           setState(prev => ({ 
             ...prev, 
-            error: errorMessage, 
+            messages: finalMessages, 
+            isStreaming: false, 
+            streamingContent: '',
+            status: 'ready',
+          }));
+        }
+        break;
+      } else if (event.type === 'error') {
+        unsubscribe();
+        
+        if (mountedRef.current) {
+          setState(prev => ({ 
+            ...prev,
+            error: event.error.message, 
             isStreaming: false,
             status: 'error',
           }));
         }
+        break;
       }
     }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    if (mountedRef.current) {
+      setState(prev => ({ 
+        ...prev, 
+        error: errorMessage, 
+        isStreaming: false,
+        status: 'error',
+      }));
+    }
+  }
   };
 
   // Input handling
@@ -860,7 +948,7 @@ I will automatically coordinate specialized agents when needed for complex tasks
         ...prev,
         cursorPosition: Math.min(prev.currentInput.length, prev.cursorPosition + 1),
       }));
-    } else if (input && !key.ctrl && !key.meta && !key.shift) {
+    } else if (input && !key.ctrl && !key.meta) {
       setState(prev => {
         const newInput =
           prev.currentInput.slice(0, prev.cursorPosition) +
@@ -886,31 +974,61 @@ I will automatically coordinate specialized agents when needed for complex tasks
   const skillCount = skillManagerRef.current?.getSkillCount() || 0;
 
   return (
-    <Box flexDirection="column" padding={1}>
-      {/* Header */}
-      <Box marginBottom={1}>
-        <Text bold color="cyan">
-          ┌─────────────────────────────────────────┐
-        </Text>
-      </Box>
-      <Box marginBottom={1} justifyContent="center">
-        <Text bold color="cyan">
-          │  🤖  CC_CLONE - AI Assistant  │
-        </Text>
-      </Box>
-      <Box marginBottom={1}>
-        <Text bold color="cyan">
-          └─────────────────────────────────────────┘
-        </Text>
-      </Box>
+<Box flexDirection="column" padding={1}>
+  {/* Welcome Banner */}
+  <Box 
+    marginBottom={1} 
+    paddingX={2} 
+    paddingY={1} 
+    borderStyle="round" 
+    borderColor="#CD853F"
+  >
+    <Text color="#CD853F">✱ </Text>
+    <Text>Welcome to the </Text>
+    <Text bold>Claude Code Clone</Text>
+    <Text> playground!</Text>
+  </Box>
 
-      {/* Status Bar */}
-      <StatusBar 
-        status={state.status} 
-        error={state.error}
-        agentCount={state.availableAgents.length}
-        skillCount={skillCount}
-      />
+  {/* Tilde */}
+  <Box marginBottom={1}>
+    <Text color="cyan">~</Text>
+  </Box>
+
+  {/* ASCII Art Header */}
+  <Box marginBottom={1}>
+      <Text bold color="#CD853F">
+        {'  ██████╗ ██████╗     ██████╗██╗      ██████╗ ███╗   ██╗███████╗'}
+      </Text>
+    </Box>
+    <Box marginBottom={1}>
+      <Text bold color="#CD853F">
+        {'██╔════╝██╔════╝    ██╔════╝██║     ██╔═══██╗████╗  ██║██╔════╝'}
+      </Text>
+    </Box>
+    <Box marginBottom={1}>
+      <Text bold color="#CD853F">
+        {'██║     ██║         ██║     ██║     ██║   ██║██╔██╗ ██║█████╗  '}
+      </Text>
+    </Box>
+    <Box marginBottom={1}>
+      <Text bold color="#CD853F">
+        {'██║     ██║         ██║     ██║     ██║   ██║██║╚██╗██║██╔══╝  '}
+      </Text>
+    </Box>
+    <Box marginBottom={1}>
+      <Text bold color="#CD853F">
+        {'╚██████╗╚██████╗    ╚██████╗███████╗╚██████╔╝██║ ╚████║███████╗'}
+      </Text>
+    </Box>
+    <Box marginBottom={1}>
+      <Text bold color="#CD853F">
+        {' ╚═════╝ ╚═════╝     ╚═════╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝'}
+      </Text>
+    </Box>
+    
+    <Box marginBottom={1} marginTop={1}>
+      <Text color="#CD853F">        🤖 AI Assistant v1.0</Text>
+    </Box>
 
       {/* Error */}
       {state.error && (
@@ -997,6 +1115,18 @@ I will automatically coordinate specialized agents when needed for complex tasks
         <StreamingMessage content={state.streamingContent} />
       )}
 
+      {/* Bottom Status Bar */}
+      {state.initialized && (
+        <Box marginTop={1} marginBottom={0}>
+          <StatusBar 
+            status={state.status} 
+            error={state.error}
+            agentCount={state.availableAgents.length}
+            skillCount={skillCount}
+          />
+        </Box>
+      )}
+
       {/* Input Area */}
       {state.initialized && !state.showAgentCreator && (
         <InputPrompt
@@ -1015,7 +1145,7 @@ I will automatically coordinate specialized agents when needed for complex tasks
 
       {/* Help */}
       <Box marginTop={1}>
-        <Text dimColor color="gray">
+        <Text color="white">
           {state.initialized 
             ? 'Type your message or /help for commands • Enter to send • Ctrl+C to exit' 
             : 'Please wait while the system initializes...'}
