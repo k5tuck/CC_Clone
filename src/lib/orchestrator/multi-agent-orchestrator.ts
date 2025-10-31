@@ -95,7 +95,7 @@ export class MultiAgentOrchestrator {
     promptTemplatesDir: string = './.claude/prompts'
   ) {
     this.llm = new OllamaClient({
-      endpoint: ollamaEndpoint,
+      baseUrl: ollamaEndpoint,
       model: model,
       temperature: 0.7,
       timeout: 120000,
@@ -118,7 +118,7 @@ export class MultiAgentOrchestrator {
       if (!health.healthy) {
         throw new OrchestratorInitError(
           health.error || 'LLM health check failed',
-          { endpoint: this.llm.getConfig().endpoint }
+          { endpoint: this.llm.getConfig().baseUrl }
         );
       }
 
@@ -130,7 +130,7 @@ export class MultiAgentOrchestrator {
       await this.loadRegistry();
 
       console.log('✅ Orchestrator initialized successfully');
-      console.log(`   LLM: ${this.llm.getConfig().model} at ${this.llm.getConfig().endpoint}`);
+      console.log(`   LLM: ${this.llm.getConfig().model} at ${this.llm.getConfig().baseUrl}`);
       console.log(`   Output: ${this.baseOutputDir}`);
       console.log(`   Templates: ${this.promptTemplatesDir}`);
     } catch (error: any) {

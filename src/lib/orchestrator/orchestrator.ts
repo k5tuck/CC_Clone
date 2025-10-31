@@ -9,7 +9,7 @@ export class Orchestrator extends Agent{
   constructor(meta: AgentMeta, projectDir: string) {
     // 1️⃣ Create Ollama client
     const ollamaConfig: OllamaConfig = {
-      endpoint: process.env.OLLAMA_ENDPOINT || 'http://localhost:11434',
+      baseUrl: process.env.OLLAMA_ENDPOINT || 'http://localhost:11434',
       model: process.env.OLLAMA_MODEL || 'llama3.1:latest',
       temperature: 0.7,
       timeout: 120000,

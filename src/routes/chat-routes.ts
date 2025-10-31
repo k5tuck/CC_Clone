@@ -1,11 +1,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { Agent, AgentMeta } from '../../lib/agent';
-import { OllamaClient } from '../../lib/llm/ollama-client';
-import { registerTools } from '../../lib/tools';
-import { registerGitTools } from '../../lib/tools/git-tools';
-import { registerHTTPTools } from '../../lib/tools/http-tools';
-import { MCPClientManager, MCPServerConfig } from '../../mcp/mcp-client';
-import { enhanceSystemMessageWithProjectContext } from '../../lib/context/ProjectContextLoader';
+import { Agent, AgentMeta } from '../lib/agent';
+import { OllamaClient } from '../lib/llm/ollama-client';
+import { registerTools } from '../lib/tools';
+import { registerGitTools } from '../lib/tools/git-tools';
+import { registerHTTPTools } from '../lib/tools/http-tools';
+import { MCPClientManager, MCPServerConfig } from '../mcp/mcp-client';
+import { enhanceSystemMessageWithProjectContext } from '../lib/context/ProjectContextLoader';
 import fs from 'fs/promises';
 import path from 'path';
 

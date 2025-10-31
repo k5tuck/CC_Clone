@@ -53,8 +53,9 @@ export class InvalidToolCallError extends Error {
  * Message structure for chat conversations
  */
 export interface Message {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  tool_call_id?: string;
 }
 
 /**
@@ -86,7 +87,7 @@ export interface ToolCall {
  * Configuration for Ollama client
  */
 export interface OllamaConfig {
-  endpoint: string;
+  baseUrl: string;  // Changed from 'endpoint' to match your usage
   model: string;
   temperature?: number;
   timeout?: number;
@@ -126,7 +127,7 @@ export class OllamaClient {
     };
 
     this.client = axios.create({
-      baseURL: this.config.endpoint,
+      baseURL: this.config.baseUrl,
       timeout: this.config.timeout,
       headers: {
         'Content-Type': 'application/json',
@@ -152,7 +153,10 @@ export class OllamaClient {
       try {
         const response = await this.client.post<OllamaResponse>('/api/chat', {
           model: this.config.model,
-          messages: messages,
+          messages: messages.map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
           stream: false,
           options: {
             temperature: this.config.temperature,
@@ -174,7 +178,7 @@ export class OllamaClient {
 
         if (error.code === 'ECONNREFUSED') {
           throw new LLMConnectionError(
-            this.config.endpoint,
+            this.config.baseUrl,
             error,
             { ...context, attempt }
           );
@@ -202,8 +206,6 @@ export class OllamaClient {
 
   /**
    * Chat with tool calling support
-   * Note: Ollama doesn't natively support function calling like OpenAI,
-   * so we'll use prompt engineering to simulate it
    */
   async chatWithTools(
     messages: Message[],
@@ -317,7 +319,7 @@ You can use multiple tools by including multiple JSON blocks. Always explain wha
     }
 
     for (const msg of messages) {
-      if (!msg.role || !['system', 'user', 'assistant'].includes(msg.role)) {
+      if (!msg.role || !['system', 'user', 'assistant', 'tool'].includes(msg.role)) {
         throw new Error(`Invalid message role: ${msg.role}`);
       }
       if (typeof msg.content !== 'string') {
@@ -356,26 +358,100 @@ You can use multiple tools by including multiple JSON blocks. Always explain wha
 
   /**
    * Check if Ollama is running and model is available
+   * FIXED: Better error handling and model name matching
    */
-  async healthCheck(): Promise<{ healthy: boolean; error?: string }> {
+  async healthCheck(): Promise<{ healthy: boolean; error?: string; models?: string[] }> {
     try {
-      const response = await this.client.get('/api/tags');
+      // First, check if Ollama is responding at all
+      const response = await this.client.get('/api/tags', {
+        timeout: 5000, // Short timeout for health check
+      });
+
+      if (!response.data) {
+        return {
+          healthy: false,
+          error: 'Ollama responded but returned no data',
+        };
+      }
+
       const models = response.data?.models || [];
-      const modelExists = models.some((m: any) => m.name === this.config.model);
+      const modelNames = models.map((m: any) => m.name || m.model || '');
+
+      // Check for exact match or partial match (e.g., "llama3.1:latest" matches "llama3.1")
+      const modelExists = modelNames.some((name: string) => {
+        return name === this.config.model || 
+               name.startsWith(this.config.model) ||
+               this.config.model.startsWith(name);
+      });
 
       if (!modelExists) {
         return {
           healthy: false,
-          error: `Model ${this.config.model} not found. Available models: ${models.map((m: any) => m.name).join(', ')}`,
+          error: `Model "${this.config.model}" not found. Available models: ${modelNames.join(', ') || 'none'}`,
+          models: modelNames,
         };
       }
 
-      return { healthy: true };
+      return { 
+        healthy: true,
+        models: modelNames,
+      };
+
     } catch (error: any) {
+      // Better error messages
+      if (error.code === 'ECONNREFUSED') {
+        return {
+          healthy: false,
+          error: `Cannot connect to Ollama at ${this.config.baseUrl}. Is Ollama running? Try: ollama list`,
+        };
+      }
+
+      if (error.code === 'ETIMEDOUT') {
+        return {
+          healthy: false,
+          error: `Connection to Ollama timed out at ${this.config.baseUrl}`,
+        };
+      }
+
       return {
         healthy: false,
-        error: error.message,
+        error: `Health check failed: ${error.message}`,
       };
+    }
+  }
+
+  /**
+   * List available models
+   */
+  async listModels(): Promise<string[]> {
+    try {
+      const response = await this.client.get('/api/tags');
+      const models = response.data?.models || [];
+      return models.map((m: any) => m.name || m.model);
+    } catch (error: any) {
+      throw new LLMConnectionError(
+        this.config.baseUrl,
+        error,
+        { operation: 'listModels' }
+      );
+    }
+  }
+
+  /**
+   * Pull a model from Ollama library
+   */
+  async pullModel(modelName: string): Promise<void> {
+    try {
+      await this.client.post('/api/pull', {
+        name: modelName,
+        stream: false,
+      });
+    } catch (error: any) {
+      throw new LLMConnectionError(
+        this.config.baseUrl,
+        error,
+        { operation: 'pullModel', model: modelName }
+      );
     }
   }
 
