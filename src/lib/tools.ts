@@ -4,6 +4,8 @@ import { exec } from 'child_process';
 import { Agent } from './agent';
 import { Tool } from './llm/ollama-client';
 import { promisify } from 'util';
+import { getKnowledgeGraphTools, knowledgeGraphToolSchemas } from './tools/knowledge-tools';
+import { getMemoryTools, memoryToolSchemas } from './tools/memory-tools';
 
 const execp = promisify(exec);
 
@@ -363,5 +365,160 @@ export function registerTools(agent: Agent): void {
         required: ['cmd'],
       },
     }
+  );
+
+  // ===========================================================================
+  // Knowledge Graph Tools
+  // ===========================================================================
+
+  const kgTools = getKnowledgeGraphTools();
+
+  // Query Knowledge Graph Tool
+  agent.registerTool(
+    'queryKnowledgeGraph',
+    async (args: any) => {
+      try {
+        return await kgTools.queryKnowledgeGraph(args);
+      } catch (error: any) {
+        throw new ToolExecutionError('queryKnowledgeGraph', args, error);
+      }
+    },
+    knowledgeGraphToolSchemas[0] as any as any
+  );
+
+  // Get File Context Tool
+  agent.registerTool(
+    'getFileContext',
+    async (args: any) => {
+      try {
+        return await kgTools.getFileContext(args);
+      } catch (error: any) {
+        throw new ToolExecutionError('getFileContext', args, error);
+      }
+    },
+    knowledgeGraphToolSchemas[1] as any
+  );
+
+  // Get Agent History Tool
+  agent.registerTool(
+    'getAgentHistory',
+    async (args: any) => {
+      try {
+        return await kgTools.getAgentHistory(args);
+      } catch (error: any) {
+        throw new ToolExecutionError('getAgentHistory', args, error);
+      }
+    },
+    knowledgeGraphToolSchemas[2] as any
+  );
+
+  // Store Knowledge Tool
+  agent.registerTool(
+    'storeKnowledge',
+    async (args: any) => {
+      try {
+        return await kgTools.storeKnowledge(args);
+      } catch (error: any) {
+        throw new ToolExecutionError('storeKnowledge', args, error);
+      }
+    },
+    knowledgeGraphToolSchemas[3] as any
+  );
+
+  // Find Related Entities Tool
+  agent.registerTool(
+    'findRelatedEntities',
+    async (args: any) => {
+      try {
+        return await kgTools.findRelatedEntities(args);
+      } catch (error: any) {
+        throw new ToolExecutionError('findRelatedEntities', args, error);
+      }
+    },
+    knowledgeGraphToolSchemas[4] as any
+  );
+
+  // ===========================================================================
+  // Memory / Vector DB Tools
+  // ===========================================================================
+
+  const memTools = getMemoryTools();
+
+  // Search Similar Problems Tool
+  agent.registerTool(
+    'searchSimilarProblems',
+    async (args: any) => {
+      try {
+        return await memTools.searchSimilarProblems(args);
+      } catch (error: any) {
+        throw new ToolExecutionError('searchSimilarProblems', args, error);
+      }
+    },
+    memoryToolSchemas[0] as any
+  );
+
+  // Search Conversations Tool
+  agent.registerTool(
+    'searchConversations',
+    async (args: any) => {
+      try {
+        return await memTools.searchConversations(args);
+      } catch (error: any) {
+        throw new ToolExecutionError('searchConversations', args, error);
+      }
+    },
+    memoryToolSchemas[1] as any
+  );
+
+  // Get Related Context Tool (RAG)
+  agent.registerTool(
+    'getRelatedContext',
+    async (args: any) => {
+      try {
+        return await memTools.getRelatedContext(args);
+      } catch (error: any) {
+        throw new ToolExecutionError('getRelatedContext', args, error);
+      }
+    },
+    memoryToolSchemas[2] as any
+  );
+
+  // Get Conversation History Tool
+  agent.registerTool(
+    'getConversationHistory',
+    async (args: any) => {
+      try {
+        return await memTools.getConversationHistory(args);
+      } catch (error: any) {
+        throw new ToolExecutionError('getConversationHistory', args, error);
+      }
+    },
+    memoryToolSchemas[3] as any
+  );
+
+  // Get Memories By Agent Tool
+  agent.registerTool(
+    'getMemoriesByAgent',
+    async (args: any) => {
+      try {
+        return await memTools.getMemoriesByAgent(args);
+      } catch (error: any) {
+        throw new ToolExecutionError('getMemoriesByAgent', args, error);
+      }
+    },
+    memoryToolSchemas[4] as any
+  );
+
+  // Get Memory Stats Tool
+  agent.registerTool(
+    'getMemoryStats',
+    async (args: any) => {
+      try {
+        return await memTools.getMemoryStats();
+      } catch (error: any) {
+        throw new ToolExecutionError('getMemoryStats', args, error);
+      }
+    },
+    memoryToolSchemas[5] as any
   );
 }

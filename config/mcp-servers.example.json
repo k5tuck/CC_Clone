@@ -36,6 +36,12 @@
       "env": {
         "BRAVE_API_KEY": "your-api-key"
       }
+    },
+    {
+      "name": "shadcn-ui",
+      "command": "npx",
+      "args": ["-y", "@jpisnice/shadcn-ui-mcp-server"],
+      "env": {}
     }
   ]
 }

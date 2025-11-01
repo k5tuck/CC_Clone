@@ -6,6 +6,8 @@ import ora from 'ora';
 import * as dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs/promises';
+import { getLLMConfigManager } from './lib/config/LLMConfig';
+import inquirer from 'inquirer';
 
 // Load environment variables
 dotenv.config();
@@ -286,6 +288,200 @@ program
     } catch (error: any) {
       spinner.fail('Health check failed');
       console.error(chalk.red('\n✗ Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+/**
+ * LLM Configuration Commands
+ */
+const configCmd = program
+  .command('config')
+  .description('Manage LLM provider configuration');
+
+// Set API key
+configCmd
+  .command('set-key')
+  .description('Set API key for a cloud provider')
+  .requiredOption('-p, --provider <name>', 'Provider name (anthropic, openai)')
+  .option('-k, --key <apikey>', 'API key (will prompt if not provided)')
+  .action(async (options) => {
+    try {
+      const configManager = getLLMConfigManager();
+      await configManager.load();
+
+      let apiKey = options.key;
+      if (!apiKey) {
+        const answer = await inquirer.prompt([
+          {
+            type: 'password',
+            name: 'apiKey',
+            message: `Enter API key for ${options.provider}:`,
+            mask: '*',
+          },
+        ]);
+        apiKey = answer.apiKey;
+      }
+
+      await configManager.setApiKey(options.provider, apiKey);
+      console.log(chalk.green(`✓ API key set for ${options.provider}`));
+    } catch (error: any) {
+      console.error(chalk.red('✗ Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+// Enable provider
+configCmd
+  .command('enable')
+  .description('Enable an LLM provider')
+  .requiredOption('-p, --provider <name>', 'Provider name (anthropic, openai, ollama)')
+  .action(async (options) => {
+    try {
+      const configManager = getLLMConfigManager();
+      await configManager.load();
+      await configManager.enableProvider(options.provider);
+      console.log(chalk.green(`✓ ${options.provider} enabled`));
+    } catch (error: any) {
+      console.error(chalk.red('✗ Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+// Disable provider
+configCmd
+  .command('disable')
+  .description('Disable an LLM provider')
+  .requiredOption('-p, --provider <name>', 'Provider name (anthropic, openai, ollama)')
+  .action(async (options) => {
+    try {
+      const configManager = getLLMConfigManager();
+      await configManager.load();
+      await configManager.disableProvider(options.provider);
+      console.log(chalk.green(`✓ ${options.provider} disabled`));
+    } catch (error: any) {
+      console.error(chalk.red('✗ Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+// Set default provider
+configCmd
+  .command('set-default')
+  .description('Set the default LLM provider')
+  .requiredOption('-p, --provider <name>', 'Provider name (anthropic, openai, ollama)')
+  .action(async (options) => {
+    try {
+      const configManager = getLLMConfigManager();
+      await configManager.load();
+      await configManager.setDefaultProvider(options.provider);
+      console.log(chalk.green(`✓ Default provider set to ${options.provider}`));
+    } catch (error: any) {
+      console.error(chalk.red('✗ Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+// Set default model
+configCmd
+  .command('set-model')
+  .description('Set the default model for a provider')
+  .requiredOption('-p, --provider <name>', 'Provider name (anthropic, openai, ollama)')
+  .requiredOption('-m, --model <name>', 'Model name')
+  .action(async (options) => {
+    try {
+      const configManager = getLLMConfigManager();
+      await configManager.load();
+      await configManager.setDefaultModel(options.provider, options.model);
+      console.log(chalk.green(`✓ Default model for ${options.provider} set to ${options.model}`));
+    } catch (error: any) {
+      console.error(chalk.red('✗ Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+// List providers
+configCmd
+  .command('list')
+  .description('List all configured LLM providers')
+  .action(async () => {
+    try {
+      const configManager = getLLMConfigManager();
+      await configManager.load();
+
+      const config = configManager.getConfig();
+      const providers = configManager.getProviders();
+
+      console.log(chalk.bold('\nConfigured LLM Providers:\n'));
+      console.log(chalk.gray(`Default Provider: ${chalk.cyan(config.defaultProvider)}\n`));
+
+      for (const provider of providers) {
+        const status = provider.enabled ? chalk.green('✓ Enabled') : chalk.gray('✗ Disabled');
+        const hasKey = provider.hasApiKey ? chalk.green('✓') : chalk.red('✗');
+
+        console.log(chalk.bold(`${provider.name}:`));
+        console.log(`  Status: ${status}`);
+        console.log(`  API Key: ${hasKey}`);
+
+        const providerConfig = config.providers[provider.name as keyof typeof config.providers];
+        if (providerConfig?.defaultModel) {
+          console.log(`  Default Model: ${chalk.cyan(providerConfig.defaultModel)}`);
+        }
+        console.log();
+      }
+    } catch (error: any) {
+      console.error(chalk.red('✗ Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+// Validate provider
+configCmd
+  .command('validate')
+  .description('Validate provider configuration')
+  .requiredOption('-p, --provider <name>', 'Provider name (anthropic, openai, ollama)')
+  .action(async (options) => {
+    const spinner = ora(`Validating ${options.provider} configuration...`).start();
+
+    try {
+      const configManager = getLLMConfigManager();
+      await configManager.load();
+
+      const result = await configManager.validateProvider(options.provider);
+
+      if (result.valid) {
+        spinner.succeed(`${options.provider} configuration is valid`);
+        console.log(chalk.green('\n✓ All checks passed'));
+      } else {
+        spinner.fail(`${options.provider} configuration is invalid`);
+        console.log(chalk.red('\n✗ Validation errors:'));
+        for (const error of result.errors) {
+          console.log(chalk.red(`  • ${error}`));
+        }
+        process.exit(1);
+      }
+    } catch (error: any) {
+      spinner.fail('Validation failed');
+      console.error(chalk.red('\n✗ Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+// Show current config
+configCmd
+  .command('show')
+  .description('Show current configuration (without sensitive data)')
+  .action(async () => {
+    try {
+      const configManager = getLLMConfigManager();
+      await configManager.load();
+
+      const config = configManager.exportConfig();
+
+      console.log(chalk.bold('\nCurrent Configuration:\n'));
+      console.log(JSON.stringify(config, null, 2));
+    } catch (error: any) {
+      console.error(chalk.red('✗ Error:'), error.message);
       process.exit(1);
     }
   });
