@@ -127,12 +127,139 @@ Next steps:
 
 ## AVAILABLE TOOLS
 
-You have access to these tools:
+### Core File & Search Tools
 - \`readFile(path)\` - Read file contents
 - \`writeFile(path, content)\` - Write file
 - \`searchFiles(dir, pattern)\` - Find files matching pattern
 - \`blobSearch(dir, query)\` - Search code content
 - \`bashExec(cmd)\` - Execute shell commands (be careful!)
+
+### Knowledge Graph & Memory Tools
+
+The system provides an **ephemeral knowledge graph** and **vector database** to help you:
+- Understand code structure and dependencies
+- Learn from past agent executions
+- Track relationships between files, functions, agents, and tasks
+- Store and retrieve contextual knowledge
+
+#### Knowledge Graph Tools:
+
+**1. queryKnowledgeGraph(entityType?, filters?, limit?, orderBy?, orderDirection?)**
+   - Query entities and relationships in the graph
+   - Entity types: File, Function, Class, Agent, Task, Conversation, Module, Component, Error, Solution
+   - Use filters to narrow results: \`{name: "agent-1", status: "completed"}\`
+   - Example: Find all agents that completed tasks
+   \`\`\`
+   queryKnowledgeGraph({
+     entityType: "Agent",
+     filters: {status: "completed"},
+     limit: 10
+   })
+   \`\`\`
+
+**2. getFileContext(filePath)**
+   - **CRITICAL: Use BEFORE modifying files**
+   - Returns comprehensive file context:
+     - Dependencies (what this file imports)
+     - Dependents (what imports this file)
+     - Functions and classes defined
+     - Which agents modified it
+     - Related test files
+   - Example: Understand impact before refactoring
+   \`\`\`
+   getFileContext({filePath: "src/lib/agent.ts"})
+   // Returns: {dependencies: [...], dependents: [...], functions: [...], modifiedBy: [...]}
+   \`\`\`
+
+**3. getAgentHistory(agentName, taskType?)**
+   - Learn from past agent successes
+   - Returns: tasks completed, files modified, solutions applied
+   - Filter by task type if needed
+   - Example: See what the code-agent has done
+   \`\`\`
+   getAgentHistory({agentName: "code-agent", taskType: "bug-fix"})
+   \`\`\`
+
+**4. storeKnowledge(entity, relationships?)**
+   - Record discoveries, solutions, or file modifications
+   - Create entities and relationships in one call
+   - Example: Record a bug fix solution
+   \`\`\`
+   storeKnowledge({
+     entity: {
+       type: "Solution",
+       name: "Fix auth timeout",
+       description: "Added connection pool cleanup",
+       metadata: {severity: "high"}
+     },
+     relationships: [{
+       type: "SOLVED_BY",
+       targetId: "error:auth-timeout"
+     }]
+   })
+   \`\`\`
+
+**5. findRelatedEntities(entityId, relationshipType?, direction?, depth?, limit?)**
+   - Traverse the knowledge graph
+   - Follow relationships to discover connections
+   - Control depth (how many hops) and direction (in/out/both)
+   - Example: Find all files that depend on a module
+   \`\`\`
+   findRelatedEntities({
+     entityId: "file:src/lib/agent.ts",
+     relationshipType: "DEPENDS_ON",
+     direction: "out",
+     depth: 2
+   })
+   \`\`\`
+
+#### When to Use Knowledge Graph:
+
+✅ **DO use when:**
+- Starting a new task (check agent history for similar work)
+- Before modifying files (use getFileContext to understand impact)
+- After completing tasks (store solutions for future reference)
+- Debugging (find related errors and solutions)
+- Understanding architecture (traverse dependencies)
+
+❌ **DON'T use when:**
+- Making trivial changes to isolated files
+- The graph hasn't been populated yet (first task)
+
+#### Knowledge Graph Best Practices:
+
+1. **Before modifying code:**
+   \`\`\`
+   const context = await getFileContext({filePath: "src/lib/auth.ts"});
+   // Check: What depends on this? What tests exist?
+   \`\`\`
+
+2. **After completing a task:**
+   \`\`\`
+   await storeKnowledge({
+     entity: {
+       type: "Task",
+       name: "Implement user auth",
+       description: "Added JWT authentication",
+       metadata: {completedAt: new Date(), status: "success"}
+     }
+   });
+   \`\`\`
+
+3. **Learn from past work:**
+   \`\`\`
+   const history = await getAgentHistory({agentName: "my-name"});
+   // Review: What patterns worked? What files did I touch?
+   \`\`\`
+
+4. **Understand relationships:**
+   \`\`\`
+   const related = await findRelatedEntities({
+     entityId: "file:src/lib/agent.ts",
+     depth: 2
+   });
+   // Discover: What's in the dependency chain?
+   \`\`\`
 
 ## GOLDEN RULES
 

@@ -243,6 +243,23 @@ export class StreamingClientWithTools {
   hasTool(toolName: string): boolean {
     return this.tools.has(toolName);
   }
+
+  /**
+   * Reset file access tracking for a new session
+   * This clears the "files that have been read" state
+   */
+  resetFileAccessTracking(): void {
+    const { resetFileAccessTracking } = require('../tools/toolFunctions');
+    resetFileAccessTracking();
+  }
+
+  /**
+   * Get file access tracking statistics
+   */
+  getFileAccessStats(): { readFiles: number; sessionId: string } {
+    const { getFileAccessTracker } = require('../tools/toolFunctions');
+    return getFileAccessTracker().getStats();
+  }
 }
 
 /**
