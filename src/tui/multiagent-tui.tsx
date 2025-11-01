@@ -19,6 +19,7 @@ import {
 import { getSkillManager } from '@/lib/skills/SkillManager';
 import { MCPClientManager } from '../mcp/mcp-client';
 import { getAgentManager } from '../lib/agents/AgentManager';
+import { OllamaClient } from '../lib/llm/ollama-client';
 import * as dotenv from 'dotenv';
 import fs from 'fs/promises';
 
@@ -80,6 +81,15 @@ interface AppState {
   // Plan approval
   pendingPlan: { agentType: string; planFile: string; content: string } | null;
   awaitingApproval: boolean;
+
+  // Model selection
+  currentModel: string;
+  availableModels: string[];
+  ollamaEndpoint: string;
+
+  // Agent auto-suggest
+  autoSuggestEnabled: boolean;
+  suggestedAgent: { id: string; name: string; confidence: number } | null;
 }
 
 // ============================================================================
@@ -314,12 +324,14 @@ const InputPrompt: React.FC<{
   );
 };
 
-const StatusBar: React.FC<{ 
-  status: AppState['status']; 
+const StatusBar: React.FC<{
+  status: AppState['status'];
   error: string | null;
   agentCount: number;
   skillCount: number;
-}> = ({ status, error, agentCount, skillCount }) => {
+  currentModel: string;
+  autoSuggestEnabled: boolean;
+}> = ({ status, error, agentCount, skillCount, currentModel, autoSuggestEnabled }) => {
   const getStatusColor = (): string => {
     if (error) return 'red';
     switch (status) {
@@ -358,6 +370,12 @@ const StatusBar: React.FC<{
           <Text color="magenta">{skillCount} skills</Text>
         </>
       )}
+      <Text color="gray"> • </Text>
+      <Text color="blue">Model: {currentModel}</Text>
+      <Text color="gray"> • </Text>
+      <Text color={autoSuggestEnabled ? 'green' : 'gray'}>
+        AutoSuggest: {autoSuggestEnabled ? 'ON' : 'OFF'}
+      </Text>
     </Box>
   );
 };
@@ -430,6 +448,11 @@ const ConversationalTUI: React.FC = () => {
     selectedAgentId: null,
     pendingPlan: null,
     awaitingApproval: false,
+    currentModel: process.env.OLLAMA_MODEL || 'llama3.1:latest',
+    availableModels: [],
+    ollamaEndpoint: process.env.OLLAMA_ENDPOINT || 'http://localhost:11434',
+    autoSuggestEnabled: true,
+    suggestedAgent: null,
   });
 
   const orchestratorRef = useRef<MultiAgentOrchestrator | null>(null);
@@ -442,6 +465,7 @@ const ConversationalTUI: React.FC = () => {
   const skillManagerRef = useRef<ReturnType<typeof getSkillManager> | null>(null);
   const mcpManagerRef = useRef<MCPClientManager | null>(null);
   const agentManagerRef = useRef<ReturnType<typeof getAgentManager> | null>(null);
+  const ollamaClientRef = useRef<OllamaClient | null>(null);
   const mountedRef = useRef(true);
   const toolClientRef = useRef<StreamingClientWithTools | null>(null);
 
@@ -456,6 +480,28 @@ useEffect(() => {
 
       // Initialize streaming client
       streamingClientRef.current = new StreamingClient(endpoint, model);
+
+      // Initialize Ollama client for model management
+      ollamaClientRef.current = new OllamaClient({
+        baseUrl: endpoint,
+        model: model,
+      });
+
+      // Load available models
+      try {
+        const models = await ollamaClientRef.current.listModels();
+        if (mountedRef.current) {
+          setState(prev => ({
+            ...prev,
+            availableModels: models,
+            currentModel: model,
+            ollamaEndpoint: endpoint,
+          }));
+        }
+        console.log('[Ollama] Available models:', models);
+      } catch (error) {
+        console.warn('[Ollama] Failed to list models:', error);
+      }
 
       // Initialize tool-enabled streaming client
       toolClientRef.current = new StreamingClientWithTools(
@@ -713,6 +759,12 @@ useEffect(() => {
 • /agent <id> <task> - Execute a specific agent
 • /create-agent - Create a new agent
 • /agents - Toggle agent list display
+• /autosuggest - Toggle agent auto-suggest on/off
+
+**Model Management:**
+• /models - List available Ollama models
+• /model <name> - Switch to a different model
+• /model-current - Show current model
 
 **Templates:**
 • /templates - List agent templates
@@ -1124,6 +1176,142 @@ useEffect(() => {
         return true;
       }
 
+      case '/models': {
+        if (!ollamaClientRef.current) {
+          setState(prev => ({
+            ...prev,
+            messages: [
+              ...prev.messages,
+              {
+                role: 'system',
+                content: '❌ Ollama client not initialized',
+              } as Message,
+            ],
+          }));
+          return true;
+        }
+
+        try {
+          const models = await ollamaClientRef.current.listModels();
+          setState(prev => ({
+            ...prev,
+            availableModels: models,
+            messages: [
+              ...prev.messages,
+              {
+                role: 'system',
+                content: `**Available Ollama Models:**\n\n${models.map(m =>
+                  m === state.currentModel ? `• ${m} ✓ (current)` : `• ${m}`
+                ).join('\n')}\n\nUse /model <name> to switch models.`,
+              } as Message,
+            ],
+          }));
+        } catch (error) {
+          setState(prev => ({
+            ...prev,
+            error: error instanceof Error ? error.message : 'Failed to list models',
+          }));
+        }
+        return true;
+      }
+
+      case '/model': {
+        if (parts.length < 2) {
+          setState(prev => ({
+            ...prev,
+            messages: [
+              ...prev.messages,
+              {
+                role: 'system',
+                content: 'Usage: /model <name>\n\nUse /models to see available models.',
+              } as Message,
+            ],
+          }));
+          return true;
+        }
+
+        const newModel = parts.slice(1).join(' ');
+
+        try {
+          // Reinitialize streaming client with new model
+          streamingClientRef.current = new StreamingClient(state.ollamaEndpoint, newModel);
+
+          // Reinitialize tool client
+          toolClientRef.current = new StreamingClientWithTools(
+            streamingClientRef.current as any,
+            10
+          );
+          registerStandardTools(toolClientRef.current);
+
+          // Update Ollama client
+          ollamaClientRef.current = new OllamaClient({
+            baseUrl: state.ollamaEndpoint,
+            model: newModel,
+          });
+
+          // Reinitialize orchestrator with new model
+          const orchestrator = new MultiAgentOrchestrator(state.ollamaEndpoint, newModel);
+          await orchestrator.initialize();
+          orchestratorRef.current = orchestrator;
+
+          const bridge = new OrchestratorBridge(
+            orchestrator,
+            streamingClientRef.current,
+            historyManagerRef.current!
+          );
+          bridgeRef.current = bridge;
+
+          setState(prev => ({
+            ...prev,
+            currentModel: newModel,
+            messages: [
+              ...prev.messages,
+              {
+                role: 'system',
+                content: `✅ Switched to model: ${newModel}`,
+              } as Message,
+            ],
+          }));
+        } catch (error) {
+          setState(prev => ({
+            ...prev,
+            error: error instanceof Error ? error.message : 'Failed to switch model',
+          }));
+        }
+        return true;
+      }
+
+      case '/model-current': {
+        setState(prev => ({
+          ...prev,
+          messages: [
+            ...prev.messages,
+            {
+              role: 'system',
+              content: `**Current Model:** ${state.currentModel}\n**Endpoint:** ${state.ollamaEndpoint}`,
+            } as Message,
+          ],
+        }));
+        return true;
+      }
+
+      case '/autosuggest': {
+        const newValue = !state.autoSuggestEnabled;
+        setState(prev => ({
+          ...prev,
+          autoSuggestEnabled: newValue,
+          suggestedAgent: null,
+          messages: [
+            ...prev.messages,
+            {
+              role: 'system',
+              content: `Agent auto-suggest ${newValue ? 'enabled ✓' : 'disabled ✗'}`,
+            } as Message,
+          ],
+        }));
+        return true;
+      }
+
       default:
         return false;
     }
@@ -1195,6 +1383,10 @@ useEffect(() => {
       '/template-export ',
       '/template-install ',
       '/approve',
+      '/models',
+      '/model ',
+      '/model-current',
+      '/autosuggest',
       '/reject',
     ];
 
@@ -1244,7 +1436,7 @@ useEffect(() => {
 
   // Auto-suggest best agent for the user's request
   const suggestAgent = (userMessage: string): { agentId: string; confidence: number; reason: string } | null => {
-    if (!state.availableAgents || state.availableAgents.length === 0) {
+    if (!state.availableAgents || state.availableAgents.length === 0 || !agentOrchestratorRef.current) {
       return null;
     }
 
@@ -1255,8 +1447,12 @@ useEffect(() => {
       let score = 0;
       const matchedKeywords: string[] = [];
 
+      // Get full agent metadata
+      const fullAgent = agentOrchestratorRef.current.getAgent(agent.id);
+      if (!fullAgent) continue;
+
       // Check activation keywords
-      const keywords = agent.metadata?.activation_keywords || [];
+      const keywords = fullAgent.metadata.activation_keywords || [];
       for (const keyword of keywords) {
         if (message.includes(keyword.toLowerCase())) {
           score += 10;
@@ -1265,7 +1461,7 @@ useEffect(() => {
       }
 
       // Check capabilities
-      const capabilities = agent.metadata?.capabilities || [];
+      const capabilities = fullAgent.metadata.capabilities || [];
       for (const capability of capabilities) {
         const capWords = capability.toLowerCase().replace(/_/g, ' ').split(' ');
         for (const word of capWords) {
@@ -1344,25 +1540,32 @@ useEffect(() => {
       content: userMessage,
     });
 
-    // Auto-suggest agent if appropriate
-    const suggestion = suggestAgent(userMessage);
-    if (suggestion && suggestion.confidence > 0.5) {
-      const suggestedAgent = state.availableAgents.find(a => a.id === suggestion.agentId);
-      if (suggestedAgent) {
-        const suggestionMsg = `💡 **Agent Suggestion:** ${suggestedAgent.avatar} **${suggestedAgent.name}** might be best suited for this task.\n` +
-          `   Reason: ${suggestion.reason}\n` +
-          `   Confidence: ${(suggestion.confidence * 100).toFixed(0)}%\n\n` +
-          `   Use \`/agent ${suggestedAgent.id} ${userMessage}\` to execute with this agent specifically.\n`;
+    // Auto-suggest agent if appropriate and enabled
+    if (state.autoSuggestEnabled) {
+      const suggestion = suggestAgent(userMessage);
+      if (suggestion && suggestion.confidence > 0.5) {
+        const suggestedAgent = state.availableAgents.find(a => a.id === suggestion.agentId);
+        if (suggestedAgent) {
+          const suggestionMsg = `💡 **Agent Suggestion:** ${suggestedAgent.avatar} **${suggestedAgent.name}** might be best suited for this task.\n` +
+            `   Reason: ${suggestion.reason}\n` +
+            `   Confidence: ${(suggestion.confidence * 100).toFixed(0)}%\n\n` +
+            `   Use \`/agent ${suggestedAgent.id} ${userMessage}\` to execute with this agent specifically.\n`;
 
-        await historyManagerRef.current.saveMessage(state.conversationId, {
-          role: 'system',
-          content: suggestionMsg,
-        });
+          await historyManagerRef.current.saveMessage(state.conversationId, {
+            role: 'system',
+            content: suggestionMsg,
+          });
 
-        setState(prev => ({
-          ...prev,
-          messages: [...prev.messages, { role: 'system', content: suggestionMsg } as Message],
-        }));
+          setState(prev => ({
+            ...prev,
+            messages: [...prev.messages, { role: 'system', content: suggestionMsg } as Message],
+            suggestedAgent: {
+              id: suggestedAgent.id,
+              name: suggestedAgent.name,
+              confidence: suggestion.confidence,
+            },
+          }));
+        }
       }
     }
 
@@ -1755,11 +1958,13 @@ useEffect(() => {
       {/* Bottom Status Bar */}
       {state.initialized && (
         <Box marginTop={1} marginBottom={0}>
-          <StatusBar 
-            status={state.status} 
+          <StatusBar
+            status={state.status}
             error={state.error}
             agentCount={state.availableAgents.length}
             skillCount={skillCount}
+            currentModel={state.currentModel}
+            autoSuggestEnabled={state.autoSuggestEnabled}
           />
         </Box>
       )}
