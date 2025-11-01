@@ -1,11 +1,128 @@
 version: '3.8'
+
 services:
-  agent:
-    build: .
-    container_name: local-agent-v5
-    volumes:
-      - ./:/app
+  # Selek API Service
+  selek-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: selek-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
     environment:
-      - AGENT_HOME=/app/.local-agent
-      - LLM_ENDPOINT=http://host.docker.internal:11434
-    tty: true
+      - NODE_ENV=production
+      - PORT=3000
+
+      # Ollama Configuration
+      - OLLAMA_ENDPOINT=http://ollama:11434
+      - OLLAMA_MODEL=llama3.1:latest
+
+      # Cloud LLM Providers (optional)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+
+      # Agent Configuration
+      - AGENT_HOME=/app/data
+      - MAX_ITERATIONS=10
+      - AUTO_EXECUTE=false
+
+      # Knowledge Graph & Memory
+      - KG_PERSIST_PATH=/app/data/graphs
+      - MEMORY_PERSIST_PATH=/app/data/memory
+      - LLM_CONFIG_KEY=${LLM_CONFIG_KEY:-selek-production-key}
+
+    volumes:
+      - selek-data:/app/data
+      - ./agents:/app/agents:ro
+      - ./skills:/app/skills:ro
+      - ./config:/app/config:ro
+    networks:
+      - selek-network
+    depends_on:
+      - ollama
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Ollama (Local LLM)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: selek-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - selek-network
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Uncomment for GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # Optional: ChromaDB for production vector database
+  # chromadb:
+  #   image: chromadb/chroma:latest
+  #   container_name: selek-chromadb
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - chroma-data:/chroma/chroma
+  #   networks:
+  #     - selek-network
+  #   environment:
+  #     - CHROMA_SERVER_HTTP_PORT=8000
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # Optional: Redis for distributed agent coordination
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: selek-redis
+  #   restart: unless-stopped
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis-data:/data
+  #   networks:
+  #     - selek-network
+  #   command: redis-server --appendonly yes
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+volumes:
+  selek-data:
+    driver: local
+  ollama-data:
+    driver: local
+  # chroma-data:
+  #   driver: local
+  # redis-data:
+  #   driver: local
+
+networks:
+  selek-network:
+    driver: bridge
