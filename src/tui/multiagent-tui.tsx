@@ -20,6 +20,7 @@ import { getSkillManager } from '@/lib/skills/SkillManager';
 import { MCPClientManager } from '../mcp/mcp-client';
 import { getAgentManager } from '../lib/agents/AgentManager';
 import { OllamaClient } from '../lib/llm/ollama-client';
+import { LLMConfigManager, ProviderConfig } from '../lib/config/LLMConfig';
 import * as dotenv from 'dotenv';
 import fs from 'fs/promises';
 
@@ -86,6 +87,16 @@ interface AppState {
   currentModel: string;
   availableModels: string[];
   ollamaEndpoint: string;
+
+  // Provider management
+  currentProvider: 'anthropic' | 'openai' | 'ollama';
+  availableProviders: Array<{
+    name: string;
+    enabled: boolean;
+    configured: boolean;
+    defaultModel?: string;
+  }>;
+  showProviderSelector: boolean;
 
   // Agent auto-suggest
   autoSuggestEnabled: boolean;
@@ -330,8 +341,9 @@ const StatusBar: React.FC<{
   agentCount: number;
   skillCount: number;
   currentModel: string;
+  currentProvider: string;
   autoSuggestEnabled: boolean;
-}> = ({ status, error, agentCount, skillCount, currentModel, autoSuggestEnabled }) => {
+}> = ({ status, error, agentCount, skillCount, currentModel, currentProvider, autoSuggestEnabled }) => {
   const getStatusColor = (): string => {
     if (error) return 'red';
     switch (status) {
@@ -370,6 +382,8 @@ const StatusBar: React.FC<{
           <Text color="magenta">{skillCount} skills</Text>
         </>
       )}
+      <Text color="gray"> • </Text>
+      <Text color="yellow">Provider: {currentProvider}</Text>
       <Text color="gray"> • </Text>
       <Text color="blue">Model: {currentModel}</Text>
       <Text color="gray"> • </Text>
@@ -451,6 +465,9 @@ const ConversationalTUI: React.FC = () => {
     currentModel: process.env.OLLAMA_MODEL || 'llama3.1:latest',
     availableModels: [],
     ollamaEndpoint: process.env.OLLAMA_ENDPOINT || 'http://localhost:11434',
+    currentProvider: 'ollama',
+    availableProviders: [],
+    showProviderSelector: false,
     autoSuggestEnabled: true,
     suggestedAgent: null,
   });
@@ -466,6 +483,7 @@ const ConversationalTUI: React.FC = () => {
   const mcpManagerRef = useRef<MCPClientManager | null>(null);
   const agentManagerRef = useRef<ReturnType<typeof getAgentManager> | null>(null);
   const ollamaClientRef = useRef<OllamaClient | null>(null);
+  const llmConfigRef = useRef<LLMConfigManager | null>(null);
   const mountedRef = useRef(true);
   const toolClientRef = useRef<StreamingClientWithTools | null>(null);
 
@@ -486,6 +504,53 @@ useEffect(() => {
         baseUrl: endpoint,
         model: model,
       });
+
+      // Initialize LLM Configuration Manager
+      llmConfigRef.current = new LLMConfigManager();
+      try {
+        const config = await llmConfigRef.current.load();
+        console.log('[LLM Config] Loaded configuration');
+
+        // Determine current provider
+        const currentProv = config.defaultProvider as any || 'ollama';
+
+        // Build available providers list
+        const providers = [];
+        if (config.providers.anthropic) {
+          providers.push({
+            name: 'anthropic',
+            enabled: config.providers.anthropic.enabled,
+            configured: !!config.providers.anthropic.apiKey,
+            defaultModel: config.providers.anthropic.defaultModel,
+          });
+        }
+        if (config.providers.openai) {
+          providers.push({
+            name: 'openai',
+            enabled: config.providers.openai.enabled,
+            configured: !!config.providers.openai.apiKey,
+            defaultModel: config.providers.openai.defaultModel,
+          });
+        }
+        if (config.providers.ollama) {
+          providers.push({
+            name: 'ollama',
+            enabled: config.providers.ollama.enabled,
+            configured: true, // Ollama is always configured locally
+            defaultModel: config.providers.ollama.defaultModel,
+          });
+        }
+
+        if (mountedRef.current) {
+          setState(prev => ({
+            ...prev,
+            currentProvider: currentProv,
+            availableProviders: providers,
+          }));
+        }
+      } catch (error) {
+        console.warn('[LLM Config] Failed to load configuration:', error);
+      }
 
       // Load available models
       try {
@@ -1295,6 +1360,146 @@ useEffect(() => {
         return true;
       }
 
+      case '/providers': {
+        if (!llmConfigRef.current) {
+          setState(prev => ({
+            ...prev,
+            messages: [
+              ...prev.messages,
+              {
+                role: 'system',
+                content: '❌ LLM Config not initialized',
+              } as Message,
+            ],
+          }));
+          return true;
+        }
+
+        try {
+          const config = await llmConfigRef.current.load();
+          const providerList = Object.entries(config.providers)
+            .map(([name, cfg]) => {
+              const status = cfg?.enabled ? '✓' : '✗';
+              const configured = name === 'ollama' || cfg?.apiKey ? '🔑' : '❌';
+              const isCurrent = config.defaultProvider === name ? ' (current)' : '';
+              return `• ${name}${isCurrent} - ${status} Enabled, ${configured} Configured - Model: ${cfg?.defaultModel || 'N/A'}`;
+            })
+            .join('\n');
+
+          setState(prev => ({
+            ...prev,
+            messages: [
+              ...prev.messages,
+              {
+                role: 'system',
+                content: `**Available Providers:**\n\n${providerList}\n\n**Current:** ${config.defaultProvider}\n\nUse /provider <name> to switch providers.`,
+              } as Message,
+            ],
+          }));
+        } catch (error) {
+          setState(prev => ({
+            ...prev,
+            error: error instanceof Error ? error.message : 'Failed to list providers',
+          }));
+        }
+        return true;
+      }
+
+      case '/provider': {
+        if (parts.length < 2) {
+          setState(prev => ({
+            ...prev,
+            messages: [
+              ...prev.messages,
+              {
+                role: 'system',
+                content: 'Usage: /provider <name>\n\nAvailable providers: anthropic, openai, ollama\n\nUse /providers to see details.',
+              } as Message,
+            ],
+          }));
+          return true;
+        }
+
+        const newProvider = parts[1].toLowerCase() as 'anthropic' | 'openai' | 'ollama';
+
+        if (!['anthropic', 'openai', 'ollama'].includes(newProvider)) {
+          setState(prev => ({
+            ...prev,
+            messages: [
+              ...prev.messages,
+              {
+                role: 'system',
+                content: `❌ Unknown provider: ${newProvider}\n\nAvailable: anthropic, openai, ollama`,
+              } as Message,
+            ],
+          }));
+          return true;
+        }
+
+        if (!llmConfigRef.current) {
+          setState(prev => ({
+            ...prev,
+            messages: [
+              ...prev.messages,
+              {
+                role: 'system',
+                content: '❌ LLM Config not initialized',
+              } as Message,
+            ],
+          }));
+          return true;
+        }
+
+        try {
+          const config = await llmConfigRef.current.load();
+          const providerConfig = config.providers[newProvider];
+
+          if (!providerConfig) {
+            throw new Error(`Provider ${newProvider} not configured`);
+          }
+
+          if (!providerConfig.enabled) {
+            throw new Error(`Provider ${newProvider} is not enabled. Enable it first in your configuration.`);
+          }
+
+          if (newProvider !== 'ollama' && !providerConfig.apiKey) {
+            throw new Error(`Provider ${newProvider} requires an API key. Configure it first.`);
+          }
+
+          // Set as default provider
+          await llmConfigRef.current.setDefaultProvider(newProvider);
+
+          // Update state
+          setState(prev => ({
+            ...prev,
+            currentProvider: newProvider,
+            currentModel: providerConfig.defaultModel || '',
+            messages: [
+              ...prev.messages,
+              {
+                role: 'system',
+                content: `✅ Switched to provider: ${newProvider}\n📦 Default model: ${providerConfig.defaultModel || 'N/A'}\n\n${newProvider === 'ollama' ? 'Note: Use /model <name> to switch Ollama models.' : 'Note: Streaming client will use this provider for next requests.'}`,
+              } as Message,
+            ],
+          }));
+
+          console.log(`[Provider] Switched to ${newProvider}`);
+        } catch (error) {
+          setState(prev => ({
+            ...prev,
+            error: error instanceof Error ? error.message : 'Failed to switch provider',
+            messages: [
+              ...prev.messages,
+              {
+                role: 'system',
+                content: `❌ ${error instanceof Error ? error.message : 'Failed to switch provider'}`,
+              } as Message,
+            ],
+          }));
+        }
+        return true;
+      }
+
       case '/autosuggest': {
         const newValue = !state.autoSuggestEnabled;
         setState(prev => ({
@@ -1964,6 +2169,7 @@ useEffect(() => {
             agentCount={state.availableAgents.length}
             skillCount={skillCount}
             currentModel={state.currentModel}
+            currentProvider={state.currentProvider}
             autoSuggestEnabled={state.autoSuggestEnabled}
           />
         </Box>
