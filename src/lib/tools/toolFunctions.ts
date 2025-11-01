@@ -48,12 +48,104 @@ class ToolExecutionError extends Error {
   }
 }
 
+class FileNotReadError extends Error {
+  constructor(
+    public readonly filePath: string
+  ) {
+    super(`File has not been read yet. Read it first before writing to it: "${filePath}"`);
+    this.name = 'FileNotReadError';
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+/**
+ * File Access Tracker - Tracks which files have been read in the current session
+ * to enforce the rule: "Files must be read before writing"
+ */
+class FileAccessTracker {
+  private static instance: FileAccessTracker | null = null;
+  private readFiles: Set<string>;
+  private sessionId: string;
+
+  private constructor() {
+    this.readFiles = new Set<string>();
+    this.sessionId = Date.now().toString();
+  }
+
+  static getInstance(): FileAccessTracker {
+    if (!FileAccessTracker.instance) {
+      FileAccessTracker.instance = new FileAccessTracker();
+    }
+    return FileAccessTracker.instance;
+  }
+
+  /**
+   * Mark a file as read
+   */
+  markAsRead(filePath: string): void {
+    const normalized = path.resolve(filePath);
+    this.readFiles.add(normalized);
+  }
+
+  /**
+   * Check if a file has been read
+   */
+  hasBeenRead(filePath: string): boolean {
+    const normalized = path.resolve(filePath);
+    return this.readFiles.has(normalized);
+  }
+
+  /**
+   * Check if a file exists on disk
+   */
+  async fileExists(filePath: string): Promise<boolean> {
+    try {
+      await fs.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Reset the tracker (e.g., for new session)
+   */
+  reset(): void {
+    this.readFiles.clear();
+    this.sessionId = Date.now().toString();
+  }
+
+  /**
+   * Get statistics
+   */
+  getStats(): { readFiles: number; sessionId: string } {
+    return {
+      readFiles: this.readFiles.size,
+      sessionId: this.sessionId,
+    };
+  }
+}
+
+/**
+ * Get the file access tracker instance
+ */
+export function getFileAccessTracker(): FileAccessTracker {
+  return FileAccessTracker.getInstance();
+}
+
+/**
+ * Reset file access tracking (useful for new sessions)
+ */
+export function resetFileAccessTracking(): void {
+  FileAccessTracker.getInstance().reset();
+}
+
 /**
  * Read file tool - accepts Record<string, any> params
  */
 export async function readFile(params: Record<string, any>): Promise<any> {
   const p = params.path;
-  
+
   if (!p || typeof p !== 'string') {
     throw new Error('path parameter is required and must be a string');
   }
@@ -61,6 +153,11 @@ export async function readFile(params: Record<string, any>): Promise<any> {
   try {
     const resolvedPath = path.resolve(p);
     const content = await fs.readFile(resolvedPath, 'utf-8');
+
+    // Track that this file has been read
+    const tracker = FileAccessTracker.getInstance();
+    tracker.markAsRead(resolvedPath);
+
     return { path: resolvedPath, content, size: content.length };
   } catch (error: any) {
     throw new FileAccessError(p, 'read', error);
@@ -73,22 +170,36 @@ export async function readFile(params: Record<string, any>): Promise<any> {
 export async function writeFile(params: Record<string, any>): Promise<any> {
   const p = params.path;
   const content = params.content;
-  
+
   if (!p || typeof p !== 'string') {
     throw new Error('path parameter is required and must be a string');
   }
 
+  const resolvedPath = path.resolve(p);
+  const tracker = FileAccessTracker.getInstance();
+
+  // Check if file exists and hasn't been read yet
+  const fileExists = await tracker.fileExists(resolvedPath);
+  const hasBeenRead = tracker.hasBeenRead(resolvedPath);
+
+  if (fileExists && !hasBeenRead) {
+    // File exists but hasn't been read - this is the critical check!
+    throw new FileNotReadError(resolvedPath);
+  }
+
   try {
-    const resolvedPath = path.resolve(p);
     const dir = path.dirname(resolvedPath);
-    
+
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(resolvedPath, content ?? '', 'utf-8');
-    
-    return { 
-      ok: true, 
+
+    // Mark as read since we just wrote it (so it can be written again in same session)
+    tracker.markAsRead(resolvedPath);
+
+    return {
+      ok: true,
       path: resolvedPath,
-      size: (content ?? '').length 
+      size: (content ?? '').length
     };
   } catch (error: any) {
     throw new FileAccessError(p, 'write', error);
