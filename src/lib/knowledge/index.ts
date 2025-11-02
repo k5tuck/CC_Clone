@@ -8,6 +8,7 @@ export * from './types';
 export * from './KnowledgeGraph';
 export * from './GraphPersistence';
 export * from './GraphVisualizer';
+export * from './VectorStorage';
 export { KnowledgeGraph, createEntityId, createRelationshipId } from './KnowledgeGraph';
 export {
   GraphPersistenceManager,

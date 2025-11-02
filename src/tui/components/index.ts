@@ -21,3 +21,6 @@ export * from './SearchResultItem';
 export * from './SearchModal';
 export * from './KnowledgeGraphPanel';
 export * from './AgentPipelinePanel';
+export * from './ErrorRecoveryPanel';
+export * from './AgentCommunicationPanel';
+export * from './TemplateBrowserPanel';

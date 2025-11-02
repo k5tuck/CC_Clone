@@ -1968,26 +1968,29 @@ useEffect(() => {
   };
 
   const handleSubmit = async (): Promise<void> => {
-    if (!state.currentInput.trim() || !state.conversationId) return;
-    if (!bridgeRef.current || !historyManagerRef.current || !bufferRef.current) return;
-  if (!toolClientRef.current) return;
+    if (!state.currentInput.trim()) return;
 
     const userMessage = state.currentInput.trim();
 
-    // Handle agent creator
-    if (state.showAgentCreator && state.creatorStep !== 'idle') {
-      await handleAgentCreatorInput(userMessage);
-      setState(prev => ({ ...prev, currentInput: '', cursorPosition: 0 }));
-      return;
-    }
-
-    // Handle commands
+    // Handle commands FIRST (they don't need conversationId)
     if (userMessage.startsWith('/')) {
       const handled = await handleCommand(userMessage);
       if (handled) {
         setState(prev => ({ ...prev, currentInput: '', cursorPosition: 0 }));
         return;
       }
+    }
+
+    // Now check for conversationId and refs (needed for regular messages)
+    if (!state.conversationId) return;
+    if (!bridgeRef.current || !historyManagerRef.current || !bufferRef.current) return;
+  if (!toolClientRef.current) return;
+
+    // Handle agent creator
+    if (state.showAgentCreator && state.creatorStep !== 'idle') {
+      await handleAgentCreatorInput(userMessage);
+      setState(prev => ({ ...prev, currentInput: '', cursorPosition: 0 }));
+      return;
     }
 
  setState(prev => ({ 
