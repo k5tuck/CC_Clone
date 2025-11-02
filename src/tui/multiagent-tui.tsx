@@ -70,6 +70,27 @@ import { getKnowledgeGraphTools } from '../lib/tools/knowledge-tools';
 import { getAgentPipelineTracker, AgentPipelineTracker } from '../lib/agents/AgentPipeline';
 import { AgentPipelinePanel } from './components';
 
+// Error Recovery System (Phase 2)
+import { getErrorRecoverySystem, ErrorRecoverySystem } from '../lib/errors';
+import { ErrorRecoveryPanel } from './components';
+
+// Agent Communication System (Phase 3)
+import { getAgentCommunicationLog, AgentCommunicationLog } from '../lib/agents/AgentCommunication';
+import { AgentCommunicationPanel } from './components';
+
+// Template System (Phase 3)
+import { getTemplateManager, TemplateManager } from '../lib/templates';
+import { TemplateBrowserPanel } from './components';
+
+// Semantic Search System (Phase 3)
+import { getSemanticSearchEngine, SemanticSearchEngine } from '../lib/semantic-search';
+
+// Rollback System (Phase 3)
+import { getRollbackManager, RollbackManager } from '../lib/rollback';
+
+// Theme System (Phase 3)
+import { getThemeManager, ThemeManager } from '../lib/themes';
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -191,6 +212,26 @@ interface AppState {
   // Agent Pipeline
   showAgentPipeline: boolean;
   showPipelineStats: boolean;
+
+  // Error Recovery (Phase 2)
+  showErrorRecovery: boolean;
+
+  // Agent Communication (Phase 3)
+  showAgentCommunication: boolean;
+  communicationMode: 'messages' | 'threads';
+
+  // Template Browser (Phase 3)
+  showTemplateBrowser: boolean;
+
+  // Semantic Search (Phase 3)
+  showSemanticSearch: boolean;
+  semanticSearchQuery: string;
+
+  // Rollback (Phase 3)
+  showRollbackHistory: boolean;
+
+  // Theme Selector (Phase 3)
+  showThemeSelector: boolean;
 }
 
 // ============================================================================
@@ -601,6 +642,26 @@ const ConversationalTUI: React.FC = () => {
     // Agent Pipeline
     showAgentPipeline: false,
     showPipelineStats: false,
+
+    // Error Recovery (Phase 2)
+    showErrorRecovery: false,
+
+    // Agent Communication (Phase 3)
+    showAgentCommunication: false,
+    communicationMode: 'threads',
+
+    // Template Browser (Phase 3)
+    showTemplateBrowser: false,
+
+    // Semantic Search (Phase 3)
+    showSemanticSearch: false,
+    semanticSearchQuery: '',
+
+    // Rollback (Phase 3)
+    showRollbackHistory: false,
+
+    // Theme Selector (Phase 3)
+    showThemeSelector: false,
   });
 
   const orchestratorRef = useRef<MultiAgentOrchestrator | null>(null);
@@ -621,6 +682,14 @@ const ConversationalTUI: React.FC = () => {
   const searchEngineRef = useRef<ReturnType<typeof getSearchEngine> | null>(null);
   const graphVisualizerRef = useRef<GraphVisualizer | null>(null);
   const pipelineTrackerRef = useRef<AgentPipelineTracker | null>(null);
+
+  // Phase 2 & 3 System Refs
+  const errorRecoveryRef = useRef<ErrorRecoverySystem | null>(null);
+  const communicationLogRef = useRef<AgentCommunicationLog | null>(null);
+  const templateManagerRef = useRef<TemplateManager | null>(null);
+  const semanticSearchRef = useRef<SemanticSearchEngine | null>(null);
+  const rollbackManagerRef = useRef<RollbackManager | null>(null);
+  const themeManagerRef = useRef<ThemeManager | null>(null);
 
   // Initialize system
 useEffect(() => {
@@ -991,6 +1060,28 @@ useEffect(() => {
       graphVisualizerRef.current = getGraphVisualizer(demoGraph);
       console.log('[KnowledgeGraph] Graph visualizer initialized');
 
+      // Initialize Phase 2 & 3 systems
+      errorRecoveryRef.current = getErrorRecoverySystem();
+      console.log('[ErrorRecovery] Error recovery system initialized');
+
+      communicationLogRef.current = getAgentCommunicationLog();
+      console.log('[Communication] Agent communication log initialized');
+
+      templateManagerRef.current = getTemplateManager();
+      await templateManagerRef.current.initialize();
+      console.log('[Templates] Template manager initialized');
+
+      semanticSearchRef.current = getSemanticSearchEngine();
+      console.log('[SemanticSearch] Semantic search engine initialized');
+
+      rollbackManagerRef.current = getRollbackManager();
+      await rollbackManagerRef.current.initialize();
+      console.log('[Rollback] Rollback manager initialized');
+
+      themeManagerRef.current = getThemeManager();
+      await themeManagerRef.current.initialize();
+      console.log('[Themes] Theme manager initialized');
+
       if (mountedRef.current) {
         setState(prev => ({
           ...prev,
@@ -1092,10 +1183,9 @@ useEffect(() => {
 • /mcp - Show MCP servers and tools status
 
 **Keyboard Shortcuts:**
+
+**Phase 1 - Core UX:**
 • Ctrl+F - Universal Search (files, agents, conversations, commands)
-• Ctrl+G - Knowledge Graph Visualization (entity relationships)
-• Ctrl+P - Agent Pipeline View (collaboration tracking)
-• Ctrl+Shift+P - Toggle Pipeline Statistics
 • Ctrl+U - Toggle Tool Usage Panel
 • Ctrl+Shift+U - Toggle Tool Statistics
 • Ctrl+S - Toggle Detailed Status Line
@@ -1104,6 +1194,21 @@ useEffect(() => {
 • Ctrl+I - Context Inspector (view context usage)
 • Ctrl+Shift+I - Context Details (show/hide details)
 • Ctrl+V - Paste from Clipboard (images supported)
+
+**Phase 2 - Advanced Visualization:**
+• Ctrl+G - Knowledge Graph Visualization (entity relationships)
+• Ctrl+P - Agent Pipeline View (collaboration tracking)
+• Ctrl+Shift+P - Toggle Pipeline Statistics
+• Ctrl+R - Error Recovery Panel (view/fix errors)
+
+**Phase 3 - Productivity Features:**
+• Ctrl+M - Agent Communication Log (inter-agent messages)
+• Ctrl+Shift+M - Toggle Messages/Threads view
+• Ctrl+T - Template Browser (conversation templates)
+• Ctrl+Shift+T - Theme Selector (choose color themes)
+• Ctrl+Z - Rollback History (undo file changes)
+
+**System:**
 • Ctrl+C / Ctrl+D - Exit`,
             } as Message,
           ],
@@ -2375,6 +2480,60 @@ useEffect(() => {
       return;
     }
 
+    // Toggle error recovery (Ctrl+R)
+    if (key.ctrl && input === 'r') {
+      setState(prev => ({
+        ...prev,
+        showErrorRecovery: !prev.showErrorRecovery,
+      }));
+      return;
+    }
+
+    // Toggle agent communication (Ctrl+M)
+    if (key.ctrl && input === 'm') {
+      setState(prev => ({
+        ...prev,
+        showAgentCommunication: !prev.showAgentCommunication,
+      }));
+      return;
+    }
+
+    // Toggle communication mode (Ctrl+Shift+M)
+    if (key.ctrl && key.shift && input === 'M') {
+      setState(prev => ({
+        ...prev,
+        communicationMode: prev.communicationMode === 'messages' ? 'threads' : 'messages',
+      }));
+      return;
+    }
+
+    // Toggle template browser (Ctrl+T)
+    if (key.ctrl && input === 't') {
+      setState(prev => ({
+        ...prev,
+        showTemplateBrowser: !prev.showTemplateBrowser,
+      }));
+      return;
+    }
+
+    // Toggle rollback history (Ctrl+Z)
+    if (key.ctrl && input === 'z') {
+      setState(prev => ({
+        ...prev,
+        showRollbackHistory: !prev.showRollbackHistory,
+      }));
+      return;
+    }
+
+    // Toggle theme selector (Ctrl+Shift+T)
+    if (key.ctrl && key.shift && input === 'T') {
+      setState(prev => ({
+        ...prev,
+        showThemeSelector: !prev.showThemeSelector,
+      }));
+      return;
+    }
+
     // Handle autocomplete suggestions
     if (state.showSuggestions && state.suggestions.length > 0) {
       if (key.upArrow) {
@@ -2661,6 +2820,33 @@ useEffect(() => {
           tracker={pipelineTrackerRef.current}
           showStats={state.showPipelineStats}
           maxDisplay={5}
+        />
+      )}
+
+      {/* Error Recovery Panel (Phase 2) */}
+      {state.showErrorRecovery && errorRecoveryRef.current && (
+        <ErrorRecoveryPanel
+          errorSystem={errorRecoveryRef.current}
+          maxDisplay={5}
+        />
+      )}
+
+      {/* Agent Communication Panel (Phase 3) */}
+      {state.showAgentCommunication && communicationLogRef.current && (
+        <AgentCommunicationPanel
+          communicationLog={communicationLogRef.current}
+          mode={state.communicationMode}
+          maxDisplay={5}
+        />
+      )}
+
+      {/* Template Browser Panel (Phase 3) */}
+      {state.showTemplateBrowser && templateManagerRef.current && (
+        <TemplateBrowserPanel
+          templateManager={templateManagerRef.current}
+          onClose={() => {
+            setState(prev => ({ ...prev, showTemplateBrowser: false }));
+          }}
         />
       )}
 
