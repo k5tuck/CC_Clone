@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
 
 /**
  * MCP Server Configuration
@@ -93,7 +94,7 @@ export class MCPClientManager {
     try {
       const response = await client.request(
         { method: 'tools/list' },
-        {}
+        z.any()
       );
 
       const tools = (response as any).tools as Tool[];
@@ -135,7 +136,7 @@ export class MCPClientManager {
             arguments: args,
           },
         },
-        {}
+        z.any()
       );
 
       return (response as any).content;

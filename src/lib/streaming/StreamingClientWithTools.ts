@@ -42,7 +42,7 @@ export type StreamingToolEvent =
  * Interface for any streaming client
  */
 export interface IStreamingClient {
-  stream(messages: Message[]): Promise<string>;
+  stream(messages: Message[]): AsyncGenerator<StreamingToolEvent>;
   chatWithTools?(messages: Message[], tools: Tool[]): Promise<{ content: string; toolCalls?: ToolCall[] }>;
 }
 

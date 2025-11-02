@@ -27,6 +27,40 @@ import fs from 'fs/promises';
 dotenv.config();
 import { createProjectContext } from '../lib/context/ProjectContextLoader';
 
+// Permission System
+import { PermissionManager, PermissionRequest, PermissionDecision } from '../lib/permissions';
+import { PermissionPrompt, PermissionIndicator } from './components';
+import {
+  initializePermissionManager,
+  createPermissionRequestHandler,
+  handlePermissionDecision,
+  getCurrentProjectPath,
+} from './integration/PermissionIntegration';
+
+// Tool Tracking System
+import { getToolTracker, ToolExecutionEvent, ToolUsageStats } from '../lib/tool-tracking';
+import { ToolUsagePanel, ToolIndicator } from './components';
+
+// Status Tracking System
+import { initializeStatusTracker, getStatusTracker, StatusInfo } from '../lib/status';
+import { EnhancedStatusLine, CompactStatusBar } from './components';
+
+// Session Management System
+import { getSessionManager, SessionMetadata, SessionTemplate } from '../lib/sessions';
+import { SessionSwitcher, SessionIndicator } from './components';
+
+// Context Inspection System
+import { getContextInspector, ContextStats, ContextItem, ContextSuggestion } from '../lib/context';
+import { ContextInspectorPanel, ContextSuggestions } from './components';
+
+// Clipboard System
+import { getClipboardHandler, ImagePasteResult, ClipboardContentType } from '../lib/clipboard';
+import { ImagePasteIndicator, ClipboardPrompt } from './components';
+
+// Search System
+import { getSearchEngine, SearchResult, SearchResultType } from '../lib/search';
+import { SearchModal } from './components';
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -101,6 +135,46 @@ interface AppState {
   // Agent auto-suggest
   autoSuggestEnabled: boolean;
   suggestedAgent: { id: string; name: string; confidence: number } | null;
+
+  // Permission System
+  permissionManager: PermissionManager | null;
+  pendingPermissionRequest: PermissionRequest | null;
+  showPermissionPrompt: boolean;
+  recentPermissions: number;
+  permissionResolver?: (decision: PermissionDecision) => void;
+
+  // Tool Tracking
+  activeToolCalls: ToolExecutionEvent[];
+  recentToolCalls: ToolExecutionEvent[];
+  toolStats: ToolUsageStats[];
+  showToolPanel: boolean;
+  showToolStats: boolean;
+
+  // Status Tracking
+  statusInfo?: StatusInfo;
+  showDetailedStatus: boolean;
+  showCompactStatus: boolean;
+
+  // Session Management
+  sessions: SessionMetadata[];
+  currentSession?: SessionMetadata;
+  showSessionSwitcher: boolean;
+
+  // Context Inspection
+  contextStats?: ContextStats;
+  contextItems: ContextItem[];
+  contextSuggestions: ContextSuggestion[];
+  showContextInspector: boolean;
+  showContextDetails: boolean;
+
+  // Clipboard
+  pastedImage?: ImagePasteResult;
+  clipboardContentType?: ClipboardContentType;
+  showClipboardPrompt: boolean;
+
+  // Search
+  showSearch: boolean;
+  searchResults: SearchResult[];
 }
 
 // ============================================================================
@@ -470,6 +544,40 @@ const ConversationalTUI: React.FC = () => {
     showProviderSelector: false,
     autoSuggestEnabled: true,
     suggestedAgent: null,
+
+    // Permission System
+    permissionManager: null,
+    pendingPermissionRequest: null,
+    showPermissionPrompt: false,
+    recentPermissions: 0,
+
+    // Tool Tracking
+    activeToolCalls: [],
+    recentToolCalls: [],
+    toolStats: [],
+    showToolPanel: true,
+    showToolStats: false,
+
+    // Status Tracking
+    showDetailedStatus: false,
+    showCompactStatus: true,
+
+    // Session Management
+    sessions: [],
+    showSessionSwitcher: false,
+
+    // Context Inspection
+    contextItems: [],
+    contextSuggestions: [],
+    showContextInspector: false,
+    showContextDetails: false,
+
+    // Clipboard
+    showClipboardPrompt: false,
+
+    // Search
+    showSearch: false,
+    searchResults: [],
   });
 
   const orchestratorRef = useRef<MultiAgentOrchestrator | null>(null);
@@ -486,6 +594,8 @@ const ConversationalTUI: React.FC = () => {
   const llmConfigRef = useRef<LLMConfigManager | null>(null);
   const mountedRef = useRef(true);
   const toolClientRef = useRef<StreamingClientWithTools | null>(null);
+  const statusUpdateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const searchEngineRef = useRef<ReturnType<typeof getSearchEngine> | null>(null);
 
   // Initialize system
 useEffect(() => {
@@ -515,13 +625,13 @@ useEffect(() => {
         const currentProv = config.defaultProvider as any || 'ollama';
 
         // Build available providers list
-        const providers = [];
+        const providers: Array<{name: string; enabled: boolean; configured: boolean; defaultModel: string}> = [];
         if (config.providers.anthropic) {
           providers.push({
             name: 'anthropic',
             enabled: config.providers.anthropic.enabled,
             configured: !!config.providers.anthropic.apiKey,
-            defaultModel: config.providers.anthropic.defaultModel,
+            defaultModel: config.providers.anthropic.defaultModel || 'claude-3-sonnet-20240229',
           });
         }
         if (config.providers.openai) {
@@ -529,7 +639,7 @@ useEffect(() => {
             name: 'openai',
             enabled: config.providers.openai.enabled,
             configured: !!config.providers.openai.apiKey,
-            defaultModel: config.providers.openai.defaultModel,
+            defaultModel: config.providers.openai.defaultModel || 'gpt-4',
           });
         }
         if (config.providers.ollama) {
@@ -537,7 +647,7 @@ useEffect(() => {
             name: 'ollama',
             enabled: config.providers.ollama.enabled,
             configured: true, // Ollama is always configured locally
-            defaultModel: config.providers.ollama.defaultModel,
+            defaultModel: config.providers.ollama.defaultModel || 'llama3',
           });
         }
 
@@ -755,6 +865,95 @@ useEffect(() => {
       const messages = await historyManagerRef.current.getHistory(conversationId);
       const agents = agentOrchestrator.listAgents();
 
+      // Initialize permission manager
+      const projectPath = getCurrentProjectPath();
+      const permissionManager = initializePermissionManager(projectPath);
+      const permissionHandler = createPermissionRequestHandler(setState);
+      permissionManager.setPermissionRequestHandler(permissionHandler);
+      console.log('[Permissions] Permission system initialized for:', projectPath);
+
+      // Initialize tool tracker
+      const toolTracker = getToolTracker();
+      toolTracker.subscribe((event) => {
+        if (mountedRef.current) {
+          setState(prev => ({
+            ...prev,
+            activeToolCalls: toolTracker.getActiveToolCalls(),
+            recentToolCalls: toolTracker.getHistory(10),
+            toolStats: toolTracker.getAllStats(),
+          }));
+        }
+      });
+      console.log('[Tools] Tool tracking initialized');
+
+      // Initialize status tracker
+      const statusTracker = initializeStatusTracker(
+        conversationId,
+        state.currentProvider,
+        state.currentModel,
+        200000 // 200k token limit
+      );
+
+      statusTracker.subscribe((statusInfo) => {
+        if (mountedRef.current) {
+          setState(prev => ({
+            ...prev,
+            statusInfo,
+          }));
+        }
+      });
+
+      // Start periodic status updates
+      statusUpdateIntervalRef.current = setInterval(() => {
+        const tracker = getStatusTracker();
+        if (tracker) {
+          tracker.updateOperationTime();
+        }
+      }, 1000);
+
+      console.log('[Status] Status tracking initialized');
+
+      // Initialize session manager
+      const sessionManager = getSessionManager();
+      const initialSession = sessionManager.createSession(
+        `Chat ${new Date().toLocaleString()}`,
+        {
+          model: state.currentModel,
+          provider: state.currentProvider,
+        }
+      );
+
+      sessionManager.subscribe((sessions) => {
+        if (mountedRef.current) {
+          setState(prev => ({
+            ...prev,
+            sessions,
+            currentSession: sessionManager.getCurrentSession(),
+          }));
+        }
+      });
+
+      console.log('[Sessions] Session management initialized');
+
+      // Initialize context inspector
+      const contextInspector = getContextInspector();
+      contextInspector.subscribe((stats) => {
+        if (mountedRef.current) {
+          setState(prev => ({
+            ...prev,
+            contextStats: stats,
+            contextItems: contextInspector.getAllItems(),
+            contextSuggestions: contextInspector.getSuggestions(),
+          }));
+        }
+      });
+
+      console.log('[Context] Context inspector initialized');
+
+      // Initialize search engine
+      searchEngineRef.current = getSearchEngine(process.cwd());
+      console.log('[Search] Search engine initialized');
+
       if (mountedRef.current) {
         setState(prev => ({
           ...prev,
@@ -764,6 +963,9 @@ useEffect(() => {
           initialized: true,
           error: null,
           availableAgents: agents,
+          permissionManager,
+          statusInfo: statusTracker.getStatus(),
+          currentSession: initialSession,
         }));
       }
     } catch (error) {
@@ -795,6 +997,14 @@ useEffect(() => {
         console.warn('[MCP] Cleanup error:', error);
       });
     }
+
+    // Cleanup status update interval
+    if (statusUpdateIntervalRef.current) {
+      clearInterval(statusUpdateIntervalRef.current);
+    }
+
+    // Cleanup permission system
+    PermissionManager.clearSession();
   };
 }, []);
 
@@ -842,7 +1052,19 @@ useEffect(() => {
 
 **Other:**
 • /skills - Toggle skills list
-• /mcp - Show MCP servers and tools status`,
+• /mcp - Show MCP servers and tools status
+
+**Keyboard Shortcuts:**
+• Ctrl+F - Universal Search (files, agents, conversations, commands)
+• Ctrl+U - Toggle Tool Usage Panel
+• Ctrl+Shift+U - Toggle Tool Statistics
+• Ctrl+S - Toggle Detailed Status Line
+• Ctrl+Shift+S - Toggle Compact Status Bar
+• Ctrl+E - Session Switcher (switch/create sessions)
+• Ctrl+I - Context Inspector (view context usage)
+• Ctrl+Shift+I - Context Details (show/hide details)
+• Ctrl+V - Paste from Clipboard (images supported)
+• Ctrl+C / Ctrl+D - Exit`,
             } as Message,
           ],
         }));
@@ -1906,12 +2128,180 @@ useEffect(() => {
   }
   };
 
+  // Handle clipboard paste
+  const handleClipboardPaste = async (): Promise<void> => {
+    try {
+      const clipboardHandler = getClipboardHandler();
+      const contentType = await clipboardHandler.detectContentType();
+
+      if (contentType === ClipboardContentType.IMAGE) {
+        const result = await clipboardHandler.readImage();
+
+        setState(prev => ({
+          ...prev,
+          pastedImage: result,
+          clipboardContentType: contentType,
+        }));
+
+        if (result.success) {
+          // Add a note to the input that an image was pasted
+          const imageNote = `[Image pasted: ${result.width}×${result.height}px, ${(result.size! / 1024).toFixed(1)}KB]`;
+          setState(prev => ({
+            ...prev,
+            currentInput: prev.currentInput ? `${prev.currentInput} ${imageNote}` : imageNote,
+            cursorPosition: prev.currentInput.length + imageNote.length + 1,
+          }));
+        }
+      } else if (contentType === ClipboardContentType.TEXT) {
+        const text = await clipboardHandler.readText();
+        if (text) {
+          setState(prev => ({
+            ...prev,
+            currentInput: prev.currentInput + text,
+            cursorPosition: prev.cursorPosition + text.length,
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Error handling clipboard paste:', error);
+    }
+  };
+
+  // Handle search result selection
+  const handleSearchSelect = (result: SearchResult): void => {
+    try {
+      // Handle different result types
+      switch (result.type) {
+        case SearchResultType.FILE:
+          if (result.filePath) {
+            // Add file path to input
+            const fileRef = result.lineNumber
+              ? `${result.filePath}:${result.lineNumber}`
+              : result.filePath;
+            setState(prev => ({
+              ...prev,
+              currentInput: `@file ${fileRef} `,
+              cursorPosition: `@file ${fileRef} `.length,
+            }));
+          }
+          break;
+
+        case SearchResultType.COMMAND:
+          // Execute command based on metadata
+          if (result.metadata?.shortcut) {
+            // This would trigger the appropriate shortcut
+            console.log(`Executing command: ${result.title}`);
+          }
+          break;
+
+        case SearchResultType.AGENT:
+          // Mention agent in input
+          setState(prev => ({
+            ...prev,
+            currentInput: `@agent ${result.title} `,
+            cursorPosition: `@agent ${result.title} `.length,
+          }));
+          break;
+
+        case SearchResultType.CONVERSATION:
+        case SearchResultType.KNOWLEDGE:
+          // Add reference to input
+          setState(prev => ({
+            ...prev,
+            currentInput: `${prev.currentInput}[${result.title}] `,
+            cursorPosition: prev.currentInput.length + result.title.length + 3,
+          }));
+          break;
+      }
+    } catch (error) {
+      console.error('Error handling search selection:', error);
+    }
+  };
+
   // Input handling
   useInput((input, key) => {
     if (!state.initialized) return;
 
     if (key.ctrl && (input === 'c' || input === 'd')) {
       exit();
+      return;
+    }
+
+    // Toggle tool panel (Ctrl+U)
+    if (key.ctrl && input === 'u') {
+      setState(prev => ({
+        ...prev,
+        showToolPanel: !prev.showToolPanel,
+      }));
+      return;
+    }
+
+    // Toggle tool stats (Ctrl+Shift+U)
+    if (key.ctrl && key.shift && input === 'U') {
+      setState(prev => ({
+        ...prev,
+        showToolStats: !prev.showToolStats,
+      }));
+      return;
+    }
+
+    // Toggle detailed status (Ctrl+S)
+    if (key.ctrl && input === 's') {
+      setState(prev => ({
+        ...prev,
+        showDetailedStatus: !prev.showDetailedStatus,
+      }));
+      return;
+    }
+
+    // Toggle compact status bar (Ctrl+Shift+S)
+    if (key.ctrl && key.shift && input === 'S') {
+      setState(prev => ({
+        ...prev,
+        showCompactStatus: !prev.showCompactStatus,
+      }));
+      return;
+    }
+
+    // Toggle session switcher (Ctrl+E)
+    if (key.ctrl && input === 'e') {
+      setState(prev => ({
+        ...prev,
+        showSessionSwitcher: !prev.showSessionSwitcher,
+      }));
+      return;
+    }
+
+    // Toggle context inspector (Ctrl+I)
+    if (key.ctrl && input === 'i') {
+      setState(prev => ({
+        ...prev,
+        showContextInspector: !prev.showContextInspector,
+      }));
+      return;
+    }
+
+    // Toggle context details (Ctrl+Shift+I)
+    if (key.ctrl && key.shift && input === 'I') {
+      setState(prev => ({
+        ...prev,
+        showContextDetails: !prev.showContextDetails,
+      }));
+      return;
+    }
+
+    // Handle clipboard paste (Ctrl+V)
+    if (key.ctrl && input === 'v') {
+      handleClipboardPaste();
+      return;
+    }
+
+    // Toggle search (Ctrl+F)
+    if (key.ctrl && input === 'f') {
+      setState(prev => ({
+        ...prev,
+        showSearch: !prev.showSearch,
+      }));
       return;
     }
 
@@ -2082,6 +2472,109 @@ useEffect(() => {
         </Box>
       )}
 
+      {/* Permission Prompt */}
+      {state.showPermissionPrompt && state.pendingPermissionRequest && state.permissionManager && (
+        <PermissionPrompt
+          request={state.pendingPermissionRequest}
+          onDecision={(decision) => handlePermissionDecision(decision, setState, state.permissionResolver)}
+          currentTrustLevel={state.permissionManager.getTrustLevel() || undefined}
+        />
+      )}
+
+      {/* Tool Usage Panel */}
+      {state.showToolPanel && (
+        <ToolUsagePanel
+          activeTools={state.activeToolCalls}
+          recentTools={state.recentToolCalls}
+          stats={state.toolStats}
+          showStats={state.showToolStats}
+          maxDisplay={5}
+        />
+      )}
+
+      {/* Enhanced Status Line */}
+      {state.showDetailedStatus && state.statusInfo && (
+        <EnhancedStatusLine status={state.statusInfo} compact={false} />
+      )}
+
+      {/* Session Switcher */}
+      {state.showSessionSwitcher && (
+        <SessionSwitcher
+          sessions={state.sessions}
+          currentSessionId={state.currentSession?.id || null}
+          onSwitch={(sessionId) => {
+            const sessionManager = getSessionManager();
+            sessionManager.switchSession(sessionId);
+            setState(prev => ({ ...prev, showSessionSwitcher: false }));
+          }}
+          onNew={(name, template) => {
+            const sessionManager = getSessionManager();
+            sessionManager.createSession(name, {
+              tags: template?.tags || [],
+              description: template?.description,
+            });
+            setState(prev => ({ ...prev, showSessionSwitcher: false }));
+          }}
+          onDelete={(sessionId) => {
+            const sessionManager = getSessionManager();
+            sessionManager.deleteSession(sessionId);
+          }}
+          onClose={() => {
+            setState(prev => ({ ...prev, showSessionSwitcher: false }));
+          }}
+        />
+      )}
+
+      {/* Context Inspector */}
+      {state.showContextInspector && state.contextStats && (
+        <ContextInspectorPanel
+          stats={state.contextStats}
+          items={state.contextItems}
+          showDetails={state.showContextDetails}
+        />
+      )}
+
+      {/* Context Suggestions */}
+      {state.contextSuggestions.length > 0 && !state.showContextInspector && (
+        <ContextSuggestions
+          suggestions={state.contextSuggestions}
+          onAccept={(suggestionId) => {
+            const suggestion = state.contextSuggestions.find(s => s.id === suggestionId);
+            if (suggestion && suggestion.type === 'remove') {
+              const inspector = getContextInspector();
+              inspector.removeItem(suggestion.item.id);
+            }
+          }}
+          onDismiss={(suggestionId) => {
+            setState(prev => ({
+              ...prev,
+              contextSuggestions: prev.contextSuggestions.filter(s => s.id !== suggestionId),
+            }));
+          }}
+        />
+      )}
+
+      {/* Image Paste Indicator */}
+      {state.pastedImage && (
+        <ImagePasteIndicator
+          result={state.pastedImage}
+          onDismiss={() => {
+            setState(prev => ({ ...prev, pastedImage: undefined }));
+          }}
+        />
+      )}
+
+      {/* Search Modal */}
+      {state.showSearch && searchEngineRef.current && (
+        <SearchModal
+          searchEngine={searchEngineRef.current}
+          onClose={() => {
+            setState(prev => ({ ...prev, showSearch: false }));
+          }}
+          onSelect={handleSearchSelect}
+        />
+      )}
+
       {/* Agent List */}
       {state.showAgentList && state.availableAgents.length > 0 && (
         <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
@@ -2206,11 +2699,18 @@ useEffect(() => {
         </Box>
       )}
 
+      {/* Compact Status Bar */}
+      {state.showCompactStatus && (
+        <Box marginTop={1}>
+          <CompactStatusBar status={state.statusInfo} />
+        </Box>
+      )}
+
       {/* Help */}
       <Box marginTop={1}>
         <Text color="white">
-          {state.initialized 
-            ? 'Type your message or /help for commands • Enter to send • Ctrl+C to exit' 
+          {state.initialized
+            ? 'Type your message or /help for commands • Enter to send • Ctrl+C to exit'
             : 'Please wait while the system initializes...'}
         </Text>
       </Box>

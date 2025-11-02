@@ -129,7 +129,7 @@ export function createChatRoutes(llmClient: OllamaClient): Router {
       const agent = await sessionManager.createSession(sessionId, systemPrompt);
       const toolInfo = agent.getToolInfo();
 
-      res.json({
+      return res.json({
         success: true,
         sessionId,
         tools: {
@@ -141,7 +141,7 @@ export function createChatRoutes(llmClient: OllamaClient): Router {
         created: new Date().toISOString(),
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   });
 
@@ -173,7 +173,7 @@ export function createChatRoutes(llmClient: OllamaClient): Router {
 
       const stats = agent.getContextStats();
 
-      res.json({
+      return res.json({
         success: true,
         sessionId,
         response,
@@ -185,7 +185,7 @@ export function createChatRoutes(llmClient: OllamaClient): Router {
         },
       });
     } catch (error: any) {
-      res.status(500).json({
+      return res.status(500).json({
         error: error.message,
         errorType: error.name,
         sessionId: req.params.sessionId,
@@ -213,7 +213,7 @@ export function createChatRoutes(llmClient: OllamaClient): Router {
       const stats = agent.getContextStats();
       const history = agent.getHistory();
 
-      res.json({
+      return res.json({
         sessionId,
         tools: toolInfo,
         context: stats,
@@ -228,7 +228,7 @@ export function createChatRoutes(llmClient: OllamaClient): Router {
         mcpServers: agent.getConnectedMCPServers(),
       });
     } catch (error: any) {
-      res.status(500).json({
+      return res.status(500).json({
         error: error.message,
       });
     }
@@ -242,12 +242,12 @@ export function createChatRoutes(llmClient: OllamaClient): Router {
     try {
       const sessions = sessionManager.getAllSessions();
 
-      res.json({
+      return res.json({
         sessions,
         count: sessions.length,
       });
     } catch (error: any) {
-      res.status(500).json({
+      return res.status(500).json({
         error: error.message,
       });
     }
@@ -271,13 +271,13 @@ export function createChatRoutes(llmClient: OllamaClient): Router {
 
       await sessionManager.deleteSession(sessionId);
 
-      res.json({
+      return res.json({
         success: true,
         sessionId,
         deleted: new Date().toISOString(),
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   });
 
@@ -299,13 +299,13 @@ export function createChatRoutes(llmClient: OllamaClient): Router {
 
       agent.clearHistory();
 
-      res.json({
+      return res.json({
         success: true,
         sessionId,
         message: 'History cleared',
       });
     } catch (error: any) {
-      res.status(500).json({
+      return res.status(500).json({
         error: error.message,
       });
     }
@@ -329,12 +329,12 @@ export function createChatRoutes(llmClient: OllamaClient): Router {
 
       const toolInfo = agent.getToolInfo();
 
-      res.json({
+      return res.json({
         sessionId,
         tools: toolInfo,
       });
     } catch (error: any) {
-      res.status(500).json({
+      return res.status(500).json({
         error: error.message,
       });
     }
@@ -358,7 +358,7 @@ export function createChatRoutes(llmClient: OllamaClient): Router {
 
       const history = agent.getHistory();
 
-      res.json({
+      return res.json({
         sessionId,
         history: history.map(turn => ({
           timestamp: turn.timestamp,
@@ -369,7 +369,7 @@ export function createChatRoutes(llmClient: OllamaClient): Router {
         count: history.length,
       });
     } catch (error: any) {
-      res.status(500).json({
+      return res.status(500).json({
         error: error.message,
       });
     }

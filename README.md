@@ -24,6 +24,15 @@
 - **Status Bar**: Live display of system status, model info, and auto-suggest state
 - **Message History**: Full conversation history with role-based formatting
 
+### ✨ Advanced UX Features (Phase 1)
+- **🔍 Universal Search** (Ctrl+F): Search across files, agents, conversations, and commands with fuzzy matching
+- **🔐 Smart Permission System**: Risk-based validation with trusted project management
+- **📊 Tool Usage Transparency** (Ctrl+U): Real-time tracking of all tool executions with performance stats
+- **📈 Enhanced Status Line** (Ctrl+S): Token usage, cost estimates, response times, and cache metrics
+- **💼 Session Management** (Ctrl+E): Multiple conversation sessions with templates and tags
+- **🧠 Context Inspector** (Ctrl+I): View context usage, auto-pruning suggestions, and token estimates
+- **📋 Clipboard Integration** (Ctrl+V): Paste images directly from clipboard with platform-specific support
+
 ### 🤖 LLM & Model Management
 - **Multi-Provider Support**: Ollama (local), Anthropic Claude, and OpenAI GPT
 - **Dynamic Provider Switching**: Switch between providers on-the-fly (`/provider`, `/providers`)
@@ -161,6 +170,21 @@ npm run cli
 - `/skills` - Toggle skills list display
 - `/mcp` - Show MCP server status and available tools
 
+### Keyboard Shortcuts
+
+Selek provides powerful keyboard shortcuts for quick access to advanced features:
+
+- **Ctrl+F** - Universal Search (files, agents, conversations, commands)
+- **Ctrl+U** - Toggle Tool Usage Panel
+- **Ctrl+Shift+U** - Toggle Tool Statistics
+- **Ctrl+S** - Toggle Detailed Status Line
+- **Ctrl+Shift+S** - Toggle Compact Status Bar
+- **Ctrl+E** - Session Switcher (switch/create sessions)
+- **Ctrl+I** - Context Inspector (view context usage)
+- **Ctrl+Shift+I** - Context Details (show/hide details)
+- **Ctrl+V** - Paste from Clipboard (images supported)
+- **Ctrl+C / Ctrl+D** - Exit
+
 ### Creating Custom Agents
 
 Use the interactive agent creator:
@@ -208,6 +232,12 @@ selek/
 ├── src/
 │   ├── tui/                    # Terminal UI
 │   │   ├── multiagent-tui.tsx  # Main TUI component
+│   │   ├── components/         # UI components (20+ components)
+│   │   │   ├── SearchModal.tsx # Universal search UI
+│   │   │   ├── ToolUsagePanel.tsx # Tool tracking display
+│   │   │   ├── SessionSwitcher.tsx # Session management UI
+│   │   │   ├── ContextInspectorPanel.tsx # Context usage UI
+│   │   │   └── ... (and more)
 │   │   └── integration/        # Orchestrator bridge
 │   ├── lib/
 │   │   ├── agents/             # Agent system
@@ -219,6 +249,20 @@ selek/
 │   │   │   └── ollama-client.ts # Ollama integration
 │   │   ├── config/
 │   │   │   └── LLMConfig.ts    # Multi-provider configuration
+│   │   ├── permissions/        # Permission system (Phase 1)
+│   │   │   └── PermissionManager.ts # Risk-based validation
+│   │   ├── tool-tracking/      # Tool tracking (Phase 1)
+│   │   │   └── ToolTracker.ts  # Real-time tool execution tracking
+│   │   ├── status/             # Status tracking (Phase 1)
+│   │   │   └── StatusTracker.ts # Metrics and performance tracking
+│   │   ├── sessions/           # Session management (Phase 1)
+│   │   │   └── SessionManager.ts # Multiple conversation sessions
+│   │   ├── context/            # Context inspection (Phase 1)
+│   │   │   └── ContextInspector.ts # Context usage tracking
+│   │   ├── clipboard/          # Clipboard integration (Phase 1)
+│   │   │   └── ClipboardHandler.ts # Image/text pasting
+│   │   ├── search/             # Universal search (Phase 1)
+│   │   │   └── SearchEngine.ts # Multi-source search
 │   │   ├── knowledge/          # Knowledge graph system
 │   │   │   └── KnowledgeGraph.ts # Entity & relationship tracking
 │   │   ├── memory/             # Memory & vector store
@@ -308,6 +352,184 @@ Create `config/mcp-servers.json`:
 ---
 
 ## 🎨 Features in Detail
+
+### Phase 1 UX Features
+
+#### Universal Search (Ctrl+F)
+
+Search across your entire project with intelligent fuzzy matching:
+
+```
+> Press Ctrl+F to open search
+
+🔍 Universal Search                                                    Esc to close
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ > auth                                                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+8 results (45ms)
+
+📄 authentication.ts
+   src/lib/auth/authentication.ts
+
+📄 auth-utils.ts
+   Line 42
+   export function validateAuthToken(token: string): boolean {
+
+🤖 SecurityAuditor
+   Identifies security vulnerabilities
+   vulnerability scanning, security best practices, OWASP compliance
+
+⌨️ help
+   Show help information
+   Ctrl+H
+```
+
+**Search Capabilities:**
+- File names and content search with line numbers
+- Agent discovery by name and capabilities
+- Command search with shortcuts
+- Conversation history (when available)
+- Knowledge graph entities (when available)
+- Fuzzy matching for typo tolerance
+- Real-time results as you type
+
+#### Tool Usage Transparency (Ctrl+U)
+
+Monitor all tool executions in real-time:
+
+```
+╭─ Tool Usage ────────────────────────────────────────────────────────╮
+│ Active Tool Calls:                                                   │
+│ 🔄 readFile                                               (2.3s)     │
+│    path: src/lib/auth.ts                                             │
+│                                                                       │
+│ Recent Tool Calls:                                                   │
+│ ✓ glob                                                   (1.2s)      │
+│    pattern: **/*.ts                                                  │
+│ ✓ grep                                                   (0.8s)      │
+│    pattern: export.*function                                         │
+│                                                                       │
+│ Press Ctrl+Shift+U for detailed statistics                          │
+╰──────────────────────────────────────────────────────────────────────╯
+```
+
+**Features:**
+- Real-time tool call tracking
+- Execution timing and performance metrics
+- Tool call history with parameters
+- Success/failure status indicators
+- Tool statistics (Ctrl+Shift+U)
+
+#### Enhanced Status Line (Ctrl+S)
+
+View comprehensive system metrics:
+
+```
+╭─ System Status ─────────────────────────────────────────────────────╮
+│ Provider: anthropic • Model: claude-3-5-sonnet-20241022             │
+│ Tokens: 45,234 / 200,000 (22%) • Cost: $0.23                       │
+│ Response Time: 1.2s avg • Cache Hit Rate: 67%                      │
+│ Operation: Analyzing code • Can Interrupt: Yes                      │
+╰──────────────────────────────────────────────────────────────────────╯
+```
+
+**Metrics Tracked:**
+- Input/output token usage with color-coded warnings
+- Cost estimates per provider (Anthropic, OpenAI, Ollama)
+- Average response times
+- Cache hit rates
+- Current operation status
+- Interrupt availability
+
+#### Session Management (Ctrl+E)
+
+Organize conversations with multiple sessions:
+
+```
+╭─ Session Switcher ──────────────────────────────────────────────────╮
+│ Sessions (3) • Templates (6)                                         │
+│                                                                       │
+│ ▸ general-chat                    ⭐                                 │
+│   Created: 2 hours ago • Last used: Just now                        │
+│   Tags: general                                                      │
+│                                                                       │
+│   bug-fix-auth                                                       │
+│   Created: 1 day ago • Last used: 5 hours ago                       │
+│   Tags: bug-fix, authentication                                      │
+│                                                                       │
+│   feature-search                                                     │
+│   Created: 3 days ago • Last used: 2 days ago                       │
+│   Tags: feature, search                                              │
+│                                                                       │
+│ Enter: Switch • N: New • D: Delete • T: Templates • Esc: Close      │
+╰──────────────────────────────────────────────────────────────────────╯
+```
+
+**Features:**
+- Multiple conversation sessions
+- 6 pre-defined templates (General, Bug Fix, Feature, Refactor, Documentation, Testing)
+- Tag-based organization
+- Star favorites
+- Session search
+- Automatic session switching
+
+#### Context Inspector (Ctrl+I)
+
+Monitor and optimize context usage:
+
+```
+╭─ Context Inspector ─────────────────────────────────────────────────╮
+│ Total: 45,234 tokens / 200,000 (22%)                                │
+│                                                                       │
+│ By Type:                                                             │
+│ 📄 Files (15)           12,450 tokens   28%                         │
+│ 💬 Conversations (23)   18,932 tokens   42%                         │
+│ ⚙️  System (1)           2,100 tokens    5%                         │
+│ 🧠 Knowledge Graph (45) 8,752 tokens    19%                         │
+│ 🔧 Tools (12)           1,500 tokens    3%                          │
+│ 🤖 Agents (8)           1,500 tokens    3%                          │
+│                                                                       │
+│ Suggestions:                                                         │
+│ • Consider removing old conversation: "debug-session-old" (2,340 t) │
+│ • File rarely accessed: src/old/legacy.ts (890 tokens)              │
+│                                                                       │
+│ Press Ctrl+Shift+I for detailed item list                           │
+╰──────────────────────────────────────────────────────────────────────╯
+```
+
+**Features:**
+- Real-time context tracking by type
+- Token usage breakdown
+- Auto-pruning suggestions
+- Importance levels (critical, high, medium, low)
+- Access count tracking
+- Context optimization recommendations
+
+#### Clipboard Integration (Ctrl+V)
+
+Paste images and text directly from your clipboard:
+
+```
+╭─────────────────────────────────────────────────────────────────────╮
+│ 📷 Image Pasted from Clipboard                                      │
+│                                                                       │
+│    Type: image/png                                                   │
+│    Dimensions: 1920 × 1080 px                                       │
+│    Size: 234.5KB                                                     │
+│                                                                       │
+│    Image will be sent to vision-capable LLM (Claude 3.5, GPT-4V)   │
+│                                                                       │
+│    Press Enter to send, or type a message to add context            │
+╰──────────────────────────────────────────────────────────────────────╯
+```
+
+**Features:**
+- Platform-specific clipboard handling (macOS, Linux, Windows)
+- Image detection and extraction
+- Automatic format detection (PNG, JPEG, etc.)
+- Vision-capable LLM integration
+- Text clipboard support
+- Visual feedback with metadata
 
 ### Multi-Provider Support
 
@@ -459,24 +681,35 @@ Contributions are welcome! Please follow these guidelines:
 
 ## 📝 Roadmap
 
-### ✅ Completed
+### ✅ Phase 1: UX/UI Enhancements (COMPLETED)
+- [x] **Universal Search** - Search across files, agents, conversations, and commands
+- [x] **Smart Permission System** - Risk-based validation with trusted projects
+- [x] **Tool Usage Transparency** - Real-time tool tracking and performance metrics
+- [x] **Enhanced Status Line** - Token usage, costs, response times, cache metrics
+- [x] **Session Management** - Multiple conversations with templates and tags
+- [x] **Context Inspector** - Context usage tracking and optimization
+- [x] **Clipboard Integration** - Image and text pasting with platform support
+
+### ✅ Foundation (COMPLETED)
 - [x] **Vector database integration for memory** - Ephemeral knowledge graph & vector store
 - [x] **Cloud LLM provider support** - Anthropic Claude & OpenAI GPT integration
 - [x] **File safety validation** - Read-before-write enforcement
 - [x] **Comprehensive system checks** - 30+ validation mechanisms
 
-### 🚧 In Progress
-- [ ] Multi-user support with authentication
-- [ ] Web-based UI alongside TUI
-- [ ] Agent collaboration and handoff
-- [ ] Persistent tool call logging
+### 🚧 Phase 2: Collaboration & Intelligence (In Progress)
+- [ ] Agent-to-agent communication protocols
+- [ ] Shared knowledge graphs across sessions
+- [ ] Advanced context optimization with ML
+- [ ] Real-time collaboration features
+- [ ] Enhanced permission granularity
 
-### 🔮 Planned
+### 🔮 Phase 3+: Extensibility & Scale (Planned)
 - [ ] Plugin system for third-party extensions
+- [ ] Web-based UI alongside TUI
+- [ ] Multi-user support with authentication
 - [ ] Docker containerization improvements
 - [ ] Performance profiling and optimization
 - [ ] Advanced knowledge graph persistence
-- [ ] Real-time agent collaboration protocols
 
 ---
 
