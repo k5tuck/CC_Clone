@@ -1,0 +1,617 @@
+/**
+ * Graph Query Language (GQL)
+ * SQL-like query language for knowledge graph traversal
+ */
+
+import { EventEmitter } from 'events';
+import { KnowledgeGraph } from '../knowledge/KnowledgeGraph';
+import { Entity, Relationship, EntityType } from '../knowledge/types';
+
+/**
+ * Query types
+ */
+export enum QueryType {
+  SELECT = 'select',
+  MATCH = 'match',
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+}
+
+/**
+ * Filter operators
+ */
+export enum FilterOperator {
+  EQUALS = '=',
+  NOT_EQUALS = '!=',
+  GREATER_THAN = '>',
+  LESS_THAN = '<',
+  CONTAINS = 'contains',
+  STARTS_WITH = 'starts_with',
+  ENDS_WITH = 'ends_with',
+  MATCHES = 'matches',
+}
+
+/**
+ * Query filter
+ */
+export interface QueryFilter {
+  field: string;
+  operator: FilterOperator;
+  value: any;
+}
+
+/**
+ * Query order
+ */
+export interface QueryOrder {
+  field: string;
+  direction: 'asc' | 'desc';
+}
+
+/**
+ * Parsed query
+ */
+export interface ParsedQuery {
+  type: QueryType;
+  nodeType?: EntityType;
+  filters: QueryFilter[];
+  traversal?: TraversalPath[];
+  limit?: number;
+  offset?: number;
+  orderBy?: QueryOrder[];
+  returnFields?: string[];
+}
+
+/**
+ * Traversal path
+ */
+export interface TraversalPath {
+  direction: 'outgoing' | 'incoming' | 'both';
+  edgeType?: string;
+  minDepth: number;
+  maxDepth: number;
+  filters?: QueryFilter[];
+}
+
+/**
+ * Query result
+ */
+export interface QueryResult {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  stats: {
+    nodesMatched: number;
+    edgesTraversed: number;
+    executionTime: number;
+  };
+}
+
+/**
+ * Graph Query Language Engine
+ */
+export class GraphQueryLanguage extends EventEmitter {
+  private graph: KnowledgeGraph;
+
+  constructor(graph: KnowledgeGraph) {
+    super();
+    this.graph = graph;
+  }
+
+  /**
+   * Execute a GQL query
+   *
+   * Examples:
+   * - MATCH (n:File) RETURN n
+   * - MATCH (n:Function) WHERE n.name CONTAINS "handle" RETURN n LIMIT 10
+   * - MATCH (n:File)-[r:IMPORTS]->(m) RETURN n, m
+   * - MATCH (n)-[*1..3]->(m:Module) WHERE m.name = "react" RETURN n
+   */
+  async execute(queryString: string): Promise<QueryResult> {
+    const startTime = Date.now();
+
+    try {
+      const query = this.parseQuery(queryString);
+      let results: GraphNode[] = [];
+      let edges: GraphEdge[] = [];
+
+      switch (query.type) {
+        case QueryType.SELECT:
+        case QueryType.MATCH:
+          ({ nodes: results, edges } = await this.executeMatch(query));
+          break;
+        case QueryType.CREATE:
+          results = await this.executeCreate(query);
+          break;
+        case QueryType.UPDATE:
+          results = await this.executeUpdate(query);
+          break;
+        case QueryType.DELETE:
+          await this.executeDelete(query);
+          break;
+      }
+
+      const executionTime = Date.now() - startTime;
+
+      this.emit('query:executed', { query: queryString, results: results.length, executionTime });
+
+      return {
+        nodes: results,
+        edges,
+        stats: {
+          nodesMatched: results.length,
+          edgesTraversed: edges.length,
+          executionTime,
+        },
+      };
+    } catch (error) {
+      this.emit('query:error', { query: queryString, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Parse a query string
+   */
+  private parseQuery(queryString: string): ParsedQuery {
+    const trimmed = queryString.trim();
+    const upper = trimmed.toUpperCase();
+
+    let type: QueryType;
+    if (upper.startsWith('SELECT')) type = QueryType.SELECT;
+    else if (upper.startsWith('MATCH')) type = QueryType.MATCH;
+    else if (upper.startsWith('CREATE')) type = QueryType.CREATE;
+    else if (upper.startsWith('UPDATE')) type = QueryType.UPDATE;
+    else if (upper.startsWith('DELETE')) type = QueryType.DELETE;
+    else throw new Error(`Invalid query type: ${queryString}`);
+
+    const query: ParsedQuery = {
+      type,
+      filters: [],
+      orderBy: [],
+    };
+
+    // Parse node type: MATCH (n:File)
+    const nodeTypeMatch = trimmed.match(/\((\w+):(\w+)\)/);
+    if (nodeTypeMatch) {
+      query.nodeType = nodeTypeMatch[2] as NodeType;
+    }
+
+    // Parse WHERE clause
+    const whereMatch = trimmed.match(/WHERE\s+(.+?)(?:\s+RETURN|\s+LIMIT|\s+ORDER|$)/i);
+    if (whereMatch) {
+      query.filters = this.parseFilters(whereMatch[1]);
+    }
+
+    // Parse traversal: -[r:IMPORTS]->
+    const traversalMatch = trimmed.match(/-\[([^\]]*)\]->/g);
+    if (traversalMatch) {
+      query.traversal = this.parseTraversal(traversalMatch);
+    }
+
+    // Parse LIMIT
+    const limitMatch = trimmed.match(/LIMIT\s+(\d+)/i);
+    if (limitMatch) {
+      query.limit = parseInt(limitMatch[1]);
+    }
+
+    // Parse OFFSET
+    const offsetMatch = trimmed.match(/OFFSET\s+(\d+)/i);
+    if (offsetMatch) {
+      query.offset = parseInt(offsetMatch[1]);
+    }
+
+    // Parse ORDER BY
+    const orderMatch = trimmed.match(/ORDER BY\s+(.+?)(?:\s+LIMIT|\s+RETURN|$)/i);
+    if (orderMatch) {
+      query.orderBy = this.parseOrderBy(orderMatch[1]);
+    }
+
+    // Parse RETURN fields
+    const returnMatch = trimmed.match(/RETURN\s+(.+?)(?:\s+LIMIT|\s+ORDER|$)/i);
+    if (returnMatch) {
+      query.returnFields = returnMatch[1].split(',').map(f => f.trim());
+    }
+
+    return query;
+  }
+
+  /**
+   * Parse filter conditions
+   */
+  private parseFilters(whereClause: string): QueryFilter[] {
+    const filters: QueryFilter[] = [];
+
+    // Split by AND (simplified - doesn't handle OR)
+    const conditions = whereClause.split(/\s+AND\s+/i);
+
+    for (const condition of conditions) {
+      const trimmed = condition.trim();
+
+      // Try different operators
+      let match;
+
+      if ((match = trimmed.match(/(\w+\.?\w*)\s*=\s*"([^"]+)"/))) {
+        filters.push({
+          field: match[1],
+          operator: FilterOperator.EQUALS,
+          value: match[2],
+        });
+      } else if ((match = trimmed.match(/(\w+\.?\w*)\s*!=\s*"([^"]+)"/))) {
+        filters.push({
+          field: match[1],
+          operator: FilterOperator.NOT_EQUALS,
+          value: match[2],
+        });
+      } else if ((match = trimmed.match(/(\w+\.?\w*)\s+CONTAINS\s+"([^"]+)"/i))) {
+        filters.push({
+          field: match[1],
+          operator: FilterOperator.CONTAINS,
+          value: match[2],
+        });
+      } else if ((match = trimmed.match(/(\w+\.?\w*)\s+STARTS_WITH\s+"([^"]+)"/i))) {
+        filters.push({
+          field: match[1],
+          operator: FilterOperator.STARTS_WITH,
+          value: match[2],
+        });
+      } else if ((match = trimmed.match(/(\w+\.?\w*)\s+MATCHES\s+"([^"]+)"/i))) {
+        filters.push({
+          field: match[1],
+          operator: FilterOperator.MATCHES,
+          value: match[2],
+        });
+      } else if ((match = trimmed.match(/(\w+\.?\w*)\s*>\s*(\d+)/))) {
+        filters.push({
+          field: match[1],
+          operator: FilterOperator.GREATER_THAN,
+          value: parseInt(match[2]),
+        });
+      } else if ((match = trimmed.match(/(\w+\.?\w*)\s*<\s*(\d+)/))) {
+        filters.push({
+          field: match[1],
+          operator: FilterOperator.LESS_THAN,
+          value: parseInt(match[2]),
+        });
+      }
+    }
+
+    return filters;
+  }
+
+  /**
+   * Parse traversal paths
+   */
+  private parseTraversal(matches: string[]): TraversalPath[] {
+    return matches.map(match => {
+      const path: TraversalPath = {
+        direction: 'outgoing',
+        minDepth: 1,
+        maxDepth: 1,
+      };
+
+      // Parse edge type: -[r:IMPORTS]->
+      const typeMatch = match.match(/\[([^\]]+)\]/);
+      if (typeMatch) {
+        const inner = typeMatch[1];
+        const parts = inner.split(':');
+        if (parts.length > 1) {
+          path.edgeType = parts[1];
+        }
+
+        // Parse depth: -[*1..3]->
+        const depthMatch = inner.match(/\*(\d+)\.\.(\d+)/);
+        if (depthMatch) {
+          path.minDepth = parseInt(depthMatch[1]);
+          path.maxDepth = parseInt(depthMatch[2]);
+        }
+      }
+
+      return path;
+    });
+  }
+
+  /**
+   * Parse ORDER BY clause
+   */
+  private parseOrderBy(orderClause: string): QueryOrder[] {
+    const orders: QueryOrder[] = [];
+    const parts = orderClause.split(',');
+
+    for (const part of parts) {
+      const trimmed = part.trim();
+      const match = trimmed.match(/(\w+\.?\w*)\s*(ASC|DESC)?/i);
+      if (match) {
+        orders.push({
+          field: match[1],
+          direction: match[2]?.toUpperCase() === 'DESC' ? 'desc' : 'asc',
+        });
+      }
+    }
+
+    return orders;
+  }
+
+  /**
+   * Execute MATCH query
+   */
+  private async executeMatch(query: ParsedQuery): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+    let nodes = this.graph.getAllNodes();
+    let edges: GraphEdge[] = [];
+
+    // Filter by node type
+    if (query.nodeType) {
+      nodes = nodes.filter(n => n.type === query.nodeType);
+    }
+
+    // Apply filters
+    nodes = this.applyFilters(nodes, query.filters);
+
+    // Apply traversal
+    if (query.traversal && query.traversal.length > 0) {
+      const traversalResult = this.applyTraversal(nodes, query.traversal);
+      nodes = traversalResult.nodes;
+      edges = traversalResult.edges;
+    }
+
+    // Apply ordering
+    if (query.orderBy && query.orderBy.length > 0) {
+      nodes = this.applyOrdering(nodes, query.orderBy);
+    }
+
+    // Apply pagination
+    const offset = query.offset || 0;
+    const limit = query.limit || nodes.length;
+    nodes = nodes.slice(offset, offset + limit);
+
+    return { nodes, edges };
+  }
+
+  /**
+   * Execute CREATE query
+   */
+  private async executeCreate(query: ParsedQuery): Promise<GraphNode[]> {
+    // Simplified - would need more parsing for full CREATE support
+    throw new Error('CREATE queries not yet implemented');
+  }
+
+  /**
+   * Execute UPDATE query
+   */
+  private async executeUpdate(query: ParsedQuery): Promise<GraphNode[]> {
+    throw new Error('UPDATE queries not yet implemented');
+  }
+
+  /**
+   * Execute DELETE query
+   */
+  private async executeDelete(query: ParsedQuery): Promise<void> {
+    const { nodes } = await this.executeMatch(query);
+    for (const node of nodes) {
+      this.graph.removeNode(node.id);
+    }
+  }
+
+  /**
+   * Apply filters to nodes
+   */
+  private applyFilters(nodes: GraphNode[], filters: QueryFilter[]): GraphNode[] {
+    return nodes.filter(node => {
+      return filters.every(filter => this.matchesFilter(node, filter));
+    });
+  }
+
+  /**
+   * Check if node matches filter
+   */
+  private matchesFilter(node: GraphNode, filter: QueryFilter): boolean {
+    const value = this.getFieldValue(node, filter.field);
+    if (value === undefined) return false;
+
+    switch (filter.operator) {
+      case FilterOperator.EQUALS:
+        return value === filter.value;
+      case FilterOperator.NOT_EQUALS:
+        return value !== filter.value;
+      case FilterOperator.GREATER_THAN:
+        return value > filter.value;
+      case FilterOperator.LESS_THAN:
+        return value < filter.value;
+      case FilterOperator.CONTAINS:
+        return String(value).toLowerCase().includes(String(filter.value).toLowerCase());
+      case FilterOperator.STARTS_WITH:
+        return String(value).toLowerCase().startsWith(String(filter.value).toLowerCase());
+      case FilterOperator.ENDS_WITH:
+        return String(value).toLowerCase().endsWith(String(filter.value).toLowerCase());
+      case FilterOperator.MATCHES:
+        return new RegExp(filter.value).test(String(value));
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Get field value from node
+   */
+  private getFieldValue(node: GraphNode, field: string): any {
+    const parts = field.split('.');
+    if (parts.length === 1) {
+      // Direct field: n.name or just name
+      return (node as any)[field] || node.data[field];
+    } else {
+      // Nested field: n.data.name
+      let value: any = node;
+      for (const part of parts) {
+        if (value && typeof value === 'object') {
+          value = value[part];
+        } else {
+          return undefined;
+        }
+      }
+      return value;
+    }
+  }
+
+  /**
+   * Apply traversal to nodes
+   */
+  private applyTraversal(
+    startNodes: GraphNode[],
+    paths: TraversalPath[]
+  ): { nodes: GraphNode[]; edges: GraphEdge[] } {
+    const resultNodes = new Set<GraphNode>();
+    const resultEdges: GraphEdge[] = [];
+
+    for (const startNode of startNodes) {
+      for (const path of paths) {
+        const { nodes, edges } = this.traverse(startNode, path);
+        nodes.forEach(n => resultNodes.add(n));
+        resultEdges.push(...edges);
+      }
+    }
+
+    return {
+      nodes: Array.from(resultNodes),
+      edges: resultEdges,
+    };
+  }
+
+  /**
+   * Traverse from a node
+   */
+  private traverse(
+    startNode: GraphNode,
+    path: TraversalPath,
+    currentDepth: number = 0,
+    visited: Set<string> = new Set()
+  ): { nodes: GraphNode[]; edges: GraphEdge[] } {
+    if (currentDepth > path.maxDepth) {
+      return { nodes: [], edges: [] };
+    }
+
+    visited.add(startNode.id);
+
+    const nodes: GraphNode[] = [];
+    const edges: GraphEdge[] = [];
+
+    if (currentDepth >= path.minDepth) {
+      nodes.push(startNode);
+    }
+
+    if (currentDepth < path.maxDepth) {
+      const outgoing = this.graph.getOutgoingEdges(startNode.id);
+
+      for (const edge of outgoing) {
+        if (path.edgeType && edge.type !== path.edgeType) continue;
+        if (visited.has(edge.target)) continue;
+
+        edges.push(edge);
+
+        const targetNode = this.graph.getNode(edge.target);
+        if (targetNode) {
+          const result = this.traverse(targetNode, path, currentDepth + 1, visited);
+          nodes.push(...result.nodes);
+          edges.push(...result.edges);
+        }
+      }
+    }
+
+    return { nodes, edges };
+  }
+
+  /**
+   * Apply ordering to nodes
+   */
+  private applyOrdering(nodes: GraphNode[], orders: QueryOrder[]): GraphNode[] {
+    return nodes.sort((a, b) => {
+      for (const order of orders) {
+        const aValue = this.getFieldValue(a, order.field);
+        const bValue = this.getFieldValue(b, order.field);
+
+        if (aValue === undefined && bValue === undefined) continue;
+        if (aValue === undefined) return 1;
+        if (bValue === undefined) return -1;
+
+        let comparison = 0;
+        if (typeof aValue === 'number' && typeof bValue === 'number') {
+          comparison = aValue - bValue;
+        } else {
+          comparison = String(aValue).localeCompare(String(bValue));
+        }
+
+        if (comparison !== 0) {
+          return order.direction === 'asc' ? comparison : -comparison;
+        }
+      }
+      return 0;
+    });
+  }
+
+  /**
+   * Get query examples
+   */
+  getExamples(): string[] {
+    return [
+      'MATCH (n:File) RETURN n',
+      'MATCH (n:Function) WHERE n.name CONTAINS "handle" RETURN n LIMIT 10',
+      'MATCH (n:File)-[r:IMPORTS]->(m) RETURN n, m',
+      'MATCH (n)-[*1..3]->(m:Module) WHERE m.name = "react" RETURN n',
+      'MATCH (n:Class) WHERE n.data.lineCount > 100 ORDER BY n.data.lineCount DESC',
+      'MATCH (n:File) WHERE n.name STARTS_WITH "test" RETURN n',
+      'DELETE (n:Temporary) WHERE n.data.age > 7',
+    ];
+  }
+}
+
+/**
+ * Query builder for programmatic query construction
+ */
+export class QueryBuilder {
+  private parts: string[] = [];
+
+  match(pattern: string): this {
+    this.parts.push(`MATCH ${pattern}`);
+    return this;
+  }
+
+  where(condition: string): this {
+    this.parts.push(`WHERE ${condition}`);
+    return this;
+  }
+
+  and(condition: string): this {
+    this.parts.push(`AND ${condition}`);
+    return this;
+  }
+
+  return(fields: string): this {
+    this.parts.push(`RETURN ${fields}`);
+    return this;
+  }
+
+  orderBy(field: string, direction: 'ASC' | 'DESC' = 'ASC'): this {
+    this.parts.push(`ORDER BY ${field} ${direction}`);
+    return this;
+  }
+
+  limit(count: number): this {
+    this.parts.push(`LIMIT ${count}`);
+    return this;
+  }
+
+  offset(count: number): this {
+    this.parts.push(`OFFSET ${count}`);
+    return this;
+  }
+
+  build(): string {
+    return this.parts.join(' ');
+  }
+}
+
+/**
+ * Create a query builder
+ */
+export function query(): QueryBuilder {
+  return new QueryBuilder();
+}

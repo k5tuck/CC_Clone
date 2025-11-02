@@ -91,6 +91,39 @@ import { getRollbackManager, RollbackManager } from '../lib/rollback';
 // Theme System (Phase 3)
 import { getThemeManager, ThemeManager } from '../lib/themes';
 
+// Pattern Recognition System (Phase 4)
+import { getPatternRecognition, PatternRecognition, DetectedPattern } from '../lib/patterns';
+import { PatternRecognitionPanel } from './components/PatternRecognitionPanel';
+
+// Graph Query Language (Phase 4)
+import { GraphQueryLanguage, QueryResult } from '../lib/graph-query';
+import { GraphQueryPanel } from './components/GraphQueryPanel';
+
+// Layout Manager (Phase 4)
+import { getLayoutManager, LayoutManager, PanelConfig } from '../lib/layout';
+
+// Progress Estimation (Phase 4)
+import { getProgressEstimator, ProgressEstimator, TaskEstimate, TaskProgress } from '../lib/progress';
+import { ProgressPanel } from './components/ProgressPanel';
+
+// Template Collections (Phase 4)
+import { getTemplateCollections, TemplateCollections, TemplateCollection } from '../lib/templates/TemplateCollections';
+import { TemplateCollectionsPanel } from './components/TemplateCollectionsPanel';
+
+// File Reference System (Phase 4)
+import { getFileReferenceParser, FileReferenceParser, ResolvedReference } from '../lib/file-reference';
+
+// Screenshot Manager (Phase 4)
+import { getScreenshotManager, ScreenshotManager, ScreenshotFormat } from '../lib/screenshot';
+
+// Permission Templates (Phase 4)
+import { getPermissionTemplates, PermissionTemplates, PermissionTemplate } from '../lib/permissions/PermissionTemplates';
+import { PermissionRevocationPanel } from './components/PermissionRevocationPanel';
+
+// Systematic Thinking (Phase 4)
+import { getSystematicThinking, SystematicThinking, StructuredResponse } from '../lib/agents/SystematicThinking';
+import { ThinkingPanel } from './components/ThinkingPanel';
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -235,6 +268,41 @@ interface AppState {
 
   // Shortcuts Reference
   showShortcuts: boolean;
+
+  // Pattern Recognition (Phase 4)
+  showPatterns: boolean;
+  patterns: DetectedPattern[];
+
+  // Graph Query (Phase 4)
+  showGraphQuery: boolean;
+  graphQueryHistory: string[];
+
+  // Layout Customization (Phase 4)
+  layoutPreset: string;
+  showLayoutSettings: boolean;
+
+  // Progress Estimation (Phase 4)
+  showProgress: boolean;
+  currentEstimate?: TaskEstimate;
+  currentProgress?: TaskProgress;
+
+  // Template Collections (Phase 4)
+  showTemplateCollections: boolean;
+  selectedCollection?: TemplateCollection;
+
+  // File References (Phase 4)
+  fileReferences: ResolvedReference[];
+
+  // Screenshot (Phase 4)
+  screenshotMode: boolean;
+
+  // Permission Management (Phase 4)
+  showPermissions: boolean;
+  permissionTemplates: PermissionTemplate[];
+
+  // Systematic Thinking (Phase 4)
+  showThinking: boolean;
+  structuredResponse?: StructuredResponse;
 }
 
 // ============================================================================
@@ -668,6 +736,37 @@ const ConversationalTUI: React.FC = () => {
 
     // Shortcuts Reference
     showShortcuts: false,
+
+    // Pattern Recognition (Phase 4)
+    showPatterns: false,
+    patterns: [],
+
+    // Graph Query (Phase 4)
+    showGraphQuery: false,
+    graphQueryHistory: [],
+
+    // Layout Customization (Phase 4)
+    layoutPreset: 'default',
+    showLayoutSettings: false,
+
+    // Progress Estimation (Phase 4)
+    showProgress: false,
+
+    // Template Collections (Phase 4)
+    showTemplateCollections: false,
+
+    // File References (Phase 4)
+    fileReferences: [],
+
+    // Screenshot (Phase 4)
+    screenshotMode: false,
+
+    // Permission Management (Phase 4)
+    showPermissions: false,
+    permissionTemplates: [],
+
+    // Systematic Thinking (Phase 4)
+    showThinking: false,
   });
 
   const orchestratorRef = useRef<MultiAgentOrchestrator | null>(null);
@@ -696,6 +795,17 @@ const ConversationalTUI: React.FC = () => {
   const semanticSearchRef = useRef<SemanticSearchEngine | null>(null);
   const rollbackManagerRef = useRef<RollbackManager | null>(null);
   const themeManagerRef = useRef<ThemeManager | null>(null);
+
+  // Phase 4 System Refs
+  const patternRecognitionRef = useRef<PatternRecognition | null>(null);
+  const graphQueryRef = useRef<GraphQueryLanguage | null>(null);
+  const layoutManagerRef = useRef<LayoutManager | null>(null);
+  const progressEstimatorRef = useRef<ProgressEstimator | null>(null);
+  const templateCollectionsRef = useRef<TemplateCollections | null>(null);
+  const fileReferenceParserRef = useRef<FileReferenceParser | null>(null);
+  const screenshotManagerRef = useRef<ScreenshotManager | null>(null);
+  const permissionTemplatesRef = useRef<PermissionTemplates | null>(null);
+  const systematicThinkingRef = useRef<SystematicThinking | null>(null);
 
   // Initialize system
 useEffect(() => {
@@ -1088,6 +1198,56 @@ useEffect(() => {
       await themeManagerRef.current.initialize();
       console.log('[Themes] Theme manager initialized');
 
+      // Initialize Phase 4 systems
+      patternRecognitionRef.current = getPatternRecognition();
+      await patternRecognitionRef.current.initialize();
+      console.log('[Patterns] Pattern recognition initialized');
+
+      layoutManagerRef.current = getLayoutManager();
+      await layoutManagerRef.current.initialize();
+      console.log('[Layout] Layout manager initialized');
+
+      progressEstimatorRef.current = getProgressEstimator();
+      await progressEstimatorRef.current.initialize();
+      console.log('[Progress] Progress estimator initialized');
+
+      templateCollectionsRef.current = getTemplateCollections();
+      await templateCollectionsRef.current.initialize();
+      console.log('[Collections] Template collections initialized');
+
+      fileReferenceParserRef.current = getFileReferenceParser();
+      console.log('[FileRef] File reference parser initialized');
+
+      screenshotManagerRef.current = getScreenshotManager();
+      await screenshotManagerRef.current.initialize();
+      console.log('[Screenshot] Screenshot manager initialized');
+
+      permissionTemplatesRef.current = getPermissionTemplates();
+      await permissionTemplatesRef.current.initialize();
+      console.log('[PermTemplates] Permission templates initialized');
+
+      systematicThinkingRef.current = getSystematicThinking();
+      console.log('[Thinking] Systematic thinking initialized');
+
+      // Set up Phase 4 event listeners
+      if (patternRecognitionRef.current) {
+        patternRecognitionRef.current.on('pattern:detected', (pattern: DetectedPattern) => {
+          setState(prev => ({
+            ...prev,
+            patterns: [...prev.patterns, pattern],
+          }));
+        });
+      }
+
+      if (progressEstimatorRef.current) {
+        progressEstimatorRef.current.on('task:progress', (progress: TaskProgress) => {
+          setState(prev => ({
+            ...prev,
+            currentProgress: progress,
+          }));
+        });
+      }
+
       if (mountedRef.current) {
         setState(prev => ({
           ...prev,
@@ -1213,6 +1373,16 @@ useEffect(() => {
 • Ctrl+T - Template Browser (conversation templates)
 • Ctrl+Shift+T - Theme Selector (choose color themes)
 • Ctrl+Z - Rollback History (undo file changes)
+
+**Phase 4 - Advanced Intelligence:**
+• Ctrl+Shift+A - Pattern Recognition (detect recurring patterns)
+• Ctrl+Q - Graph Query Language (SQL-like graph queries)
+• Ctrl+L - Layout Customization (customize panel layouts)
+• Ctrl+Shift+E - Progress Estimation (task time estimates)
+• Ctrl+Shift+C - Template Collections (curated workflows)
+• Ctrl+Shift+S - Capture Screenshot (save TUI snapshots)
+• Ctrl+Shift+R - Permission Management (manage granted permissions)
+• Ctrl+K - Systematic Thinking Panel (view agent reasoning)
 
 **System:**
 • Ctrl+? - Keyboard Shortcuts Reference (quick view all shortcuts)
@@ -2105,21 +2275,52 @@ useEffect(() => {
       return;
     }
 
- setState(prev => ({ 
-    ...prev, 
-    currentInput: '', 
+    // Process file references if present
+    let enhancedMessage = userMessage;
+    if (fileReferenceParserRef.current) {
+      const references = fileReferenceParserRef.current.parseReferences(userMessage);
+      if (references.length > 0) {
+        console.log('[FileRef] Processing', references.length, 'file references');
+        try {
+          const resolved = await fileReferenceParserRef.current.resolveReferences(references);
+
+          // Build enhanced message with file content
+          let fileContext = '\n\n**Referenced Files:**\n';
+          for (const ref of resolved) {
+            if (ref.exists && !ref.error) {
+              fileContext += `\n### ${ref.reference.original}\n\`\`\`\n${ref.content}\n\`\`\`\n`;
+            } else {
+              fileContext += `\n### ${ref.reference.original}\n_Error: ${ref.error}_\n`;
+            }
+          }
+
+          enhancedMessage = userMessage + fileContext;
+
+          setState(prev => ({
+            ...prev,
+            fileReferences: resolved,
+          }));
+        } catch (err) {
+          console.error('[FileRef] Error resolving references:', err);
+        }
+      }
+    }
+
+ setState(prev => ({
+    ...prev,
+    currentInput: '',
     cursorPosition: 0,
-    isStreaming: true, 
+    isStreaming: true,
     streamingContent: '',
     status: 'streaming',
     error: null,
   }));
 
   try {
-    // Save user message
+    // Save user message (with file references if present)
     await historyManagerRef.current.saveMessage(state.conversationId, {
       role: 'user',
-      content: userMessage,
+      content: enhancedMessage,
     });
 
     // Auto-suggest agent if appropriate and enabled
@@ -2234,24 +2435,41 @@ useEffect(() => {
       } else if (event.type === 'done') {
         buffer.flush();
         unsubscribe();
-        
+
+        // Parse systematic thinking if present
+        let structuredResponse = undefined;
+        if (systematicThinkingRef.current && systematicThinkingRef.current.hasThinkingBlocks(fullResponse)) {
+          structuredResponse = systematicThinkingRef.current.parseStructuredResponse(fullResponse);
+          console.log('[Thinking] Parsed structured response with', structuredResponse.thinking.length, 'thinking blocks');
+        }
+
+        // Parse file references if present
+        if (fileReferenceParserRef.current) {
+          const references = fileReferenceParserRef.current.parseReferences(fullResponse);
+          if (references.length > 0) {
+            console.log('[FileRef] Found', references.length, 'file references in response');
+          }
+        }
+
         // Save assistant response
         await historyManagerRef.current.saveMessage(state.conversationId, {
           role: 'assistant',
           content: fullResponse,
         });
-        
+
         await new Promise(resolve => setTimeout(resolve, 100));
-        
+
         const finalMessages = await historyManagerRef.current.getHistory(state.conversationId);
-        
+
         if (mountedRef.current) {
-          setState(prev => ({ 
-            ...prev, 
-            messages: finalMessages, 
-            isStreaming: false, 
+          setState(prev => ({
+            ...prev,
+            messages: finalMessages,
+            isStreaming: false,
             streamingContent: '',
             status: 'ready',
+            structuredResponse, // Add parsed thinking
+            showThinking: structuredResponse ? true : prev.showThinking, // Auto-show if thinking detected
           }));
         }
         break;
@@ -2546,6 +2764,88 @@ useEffect(() => {
       setState(prev => ({
         ...prev,
         showShortcuts: !prev.showShortcuts,
+      }));
+      return;
+    }
+
+    // ========== Phase 4 Keyboard Shortcuts ==========
+
+    // Toggle pattern recognition (Ctrl+Shift+A for Analysis)
+    if (key.ctrl && key.shift && input === 'A') {
+      setState(prev => ({
+        ...prev,
+        showPatterns: !prev.showPatterns,
+      }));
+      return;
+    }
+
+    // Toggle graph query panel (Ctrl+Q)
+    if (key.ctrl && input === 'q') {
+      setState(prev => ({
+        ...prev,
+        showGraphQuery: !prev.showGraphQuery,
+      }));
+      return;
+    }
+
+    // Toggle layout settings (Ctrl+L)
+    if (key.ctrl && input === 'l') {
+      setState(prev => ({
+        ...prev,
+        showLayoutSettings: !prev.showLayoutSettings,
+      }));
+      return;
+    }
+
+    // Toggle progress panel (Ctrl+Shift+E for Estimation)
+    if (key.ctrl && key.shift && input === 'E') {
+      setState(prev => ({
+        ...prev,
+        showProgress: !prev.showProgress,
+      }));
+      return;
+    }
+
+    // Toggle template collections (Ctrl+Shift+C)
+    if (key.ctrl && key.shift && input === 'C') {
+      setState(prev => ({
+        ...prev,
+        showTemplateCollections: !prev.showTemplateCollections,
+      }));
+      return;
+    }
+
+    // Capture screenshot (Ctrl+Shift+S)
+    if (key.ctrl && key.shift && input === 'S') {
+      const screenshotManager = screenshotManagerRef.current;
+      if (screenshotManager) {
+        screenshotManager.captureScreenshot({
+          format: ScreenshotFormat.PNG,
+          copyToClipboard: true,
+          tags: ['tui-snapshot'],
+        }).then(filepath => {
+          console.log(`[Screenshot] Captured: ${filepath}`);
+        }).catch(err => {
+          console.error('[Screenshot] Error:', err);
+        });
+      }
+      return;
+    }
+
+    // Toggle permission management (Ctrl+Shift+R for Revocation)
+    if (key.ctrl && key.shift && input === 'R') {
+      setState(prev => ({
+        ...prev,
+        showPermissions: !prev.showPermissions,
+      }));
+      return;
+    }
+
+    // Toggle thinking panel (Ctrl+K for Knowledge/thinking)
+    if (key.ctrl && input === 'k') {
+      setState(prev => ({
+        ...prev,
+        showThinking: !prev.showThinking,
       }));
       return;
     }
@@ -2871,6 +3171,90 @@ useEffect(() => {
         <ShortcutsPanel
           onClose={() => {
             setState(prev => ({ ...prev, showShortcuts: false }));
+          }}
+        />
+      )}
+
+      {/* ========== Phase 4 Panels ========== */}
+
+      {/* Pattern Recognition Panel */}
+      {state.showPatterns && patternRecognitionRef.current && (
+        <PatternRecognitionPanel
+          patterns={state.patterns}
+          onClose={() => {
+            setState(prev => ({ ...prev, showPatterns: false }));
+          }}
+        />
+      )}
+
+      {/* Graph Query Panel */}
+      {state.showGraphQuery && graphVisualizerRef.current && (
+        <GraphQueryPanel
+          onExecuteQuery={async (query: string) => {
+            if (!graphVisualizerRef.current) {
+              return { nodes: [], edges: [], stats: { nodesMatched: 0, edgesTraversed: 0, executionTime: 0 } };
+            }
+            const gql = new GraphQueryLanguage(graphVisualizerRef.current.getKnowledgeGraph());
+            const result = await gql.execute(query);
+            setState(prev => ({
+              ...prev,
+              graphQueryHistory: [...prev.graphQueryHistory, query].slice(-10),
+            }));
+            return result;
+          }}
+          queryHistory={state.graphQueryHistory}
+          onClose={() => {
+            setState(prev => ({ ...prev, showGraphQuery: false }));
+          }}
+        />
+      )}
+
+      {/* Progress Estimation Panel */}
+      {state.showProgress && progressEstimatorRef.current && (
+        <ProgressPanel
+          currentProgress={state.currentProgress}
+          currentEstimate={state.currentEstimate}
+          onClose={() => {
+            setState(prev => ({ ...prev, showProgress: false }));
+          }}
+        />
+      )}
+
+      {/* Template Collections Panel */}
+      {state.showTemplateCollections && templateCollectionsRef.current && (
+        <TemplateCollectionsPanel
+          collections={templateCollectionsRef.current.getAllCollections()}
+          selectedCollection={state.selectedCollection}
+          onSelectCollection={(id: string) => {
+            const collection = templateCollectionsRef.current?.getCollection(id);
+            setState(prev => ({
+              ...prev,
+              selectedCollection: collection,
+            }));
+          }}
+          onClose={() => {
+            setState(prev => ({ ...prev, showTemplateCollections: false }));
+          }}
+        />
+      )}
+
+      {/* Systematic Thinking Panel */}
+      {state.showThinking && state.structuredResponse && (
+        <ThinkingPanel
+          structuredResponse={state.structuredResponse}
+          onClose={() => {
+            setState(prev => ({ ...prev, showThinking: false }));
+          }}
+        />
+      )}
+
+      {/* Permission Management Panel */}
+      {state.showPermissions && permissionTemplatesRef.current && (
+        <PermissionRevocationPanel
+          grantedPermissions={[]}
+          templates={permissionTemplatesRef.current.getAllTemplates()}
+          onClose={() => {
+            setState(prev => ({ ...prev, showPermissions: false }));
           }}
         />
       )}

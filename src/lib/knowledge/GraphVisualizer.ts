@@ -72,6 +72,13 @@ export class GraphVisualizer {
   }
 
   /**
+   * Get the underlying knowledge graph
+   */
+  getKnowledgeGraph(): KnowledgeGraph {
+    return this.kg;
+  }
+
+  /**
    * Generate ASCII visualization of the graph
    */
   visualize(options: VisualizationOptions = {}): ASCIIVisualization {
