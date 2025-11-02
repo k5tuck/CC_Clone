@@ -80,7 +80,7 @@ import { AgentCommunicationPanel } from './components';
 
 // Template System (Phase 3)
 import { getTemplateManager, TemplateManager } from '../lib/templates';
-import { TemplateBrowserPanel } from './components';
+import { TemplateBrowserPanel, ShortcutsPanel } from './components';
 
 // Semantic Search System (Phase 3)
 import { getSemanticSearchEngine, SemanticSearchEngine } from '../lib/semantic-search';
@@ -232,6 +232,9 @@ interface AppState {
 
   // Theme Selector (Phase 3)
   showThemeSelector: boolean;
+
+  // Shortcuts Reference
+  showShortcuts: boolean;
 }
 
 // ============================================================================
@@ -662,6 +665,9 @@ const ConversationalTUI: React.FC = () => {
 
     // Theme Selector (Phase 3)
     showThemeSelector: false,
+
+    // Shortcuts Reference
+    showShortcuts: false,
   });
 
   const orchestratorRef = useRef<MultiAgentOrchestrator | null>(null);
@@ -1209,6 +1215,7 @@ useEffect(() => {
 • Ctrl+Z - Rollback History (undo file changes)
 
 **System:**
+• Ctrl+? - Keyboard Shortcuts Reference (quick view all shortcuts)
 • Ctrl+C / Ctrl+D - Exit`,
             } as Message,
           ],
@@ -2534,6 +2541,15 @@ useEffect(() => {
       return;
     }
 
+    // Toggle shortcuts panel (Ctrl+?)
+    if (key.ctrl && key.shift && input === '?') {
+      setState(prev => ({
+        ...prev,
+        showShortcuts: !prev.showShortcuts,
+      }));
+      return;
+    }
+
     // Handle autocomplete suggestions
     if (state.showSuggestions && state.suggestions.length > 0) {
       if (key.upArrow) {
@@ -2846,6 +2862,15 @@ useEffect(() => {
           templateManager={templateManagerRef.current}
           onClose={() => {
             setState(prev => ({ ...prev, showTemplateBrowser: false }));
+          }}
+        />
+      )}
+
+      {/* Shortcuts Reference Panel */}
+      {state.showShortcuts && (
+        <ShortcutsPanel
+          onClose={() => {
+            setState(prev => ({ ...prev, showShortcuts: false }));
           }}
         />
       )}

@@ -24,3 +24,4 @@ export * from './AgentPipelinePanel';
 export * from './ErrorRecoveryPanel';
 export * from './AgentCommunicationPanel';
 export * from './TemplateBrowserPanel';
+export * from './ShortcutsPanel';
