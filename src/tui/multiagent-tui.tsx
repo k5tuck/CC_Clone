@@ -61,6 +61,15 @@ import { ImagePasteIndicator, ClipboardPrompt } from './components';
 import { getSearchEngine, SearchResult, SearchResultType } from '../lib/search';
 import { SearchModal } from './components';
 
+// Knowledge Graph System
+import { getGraphVisualizer, GraphVisualizer, KnowledgeGraph } from '../lib/knowledge';
+import { KnowledgeGraphPanel } from './components';
+import { getKnowledgeGraphTools } from '../lib/tools/knowledge-tools';
+
+// Agent Pipeline System
+import { getAgentPipelineTracker, AgentPipelineTracker } from '../lib/agents/AgentPipeline';
+import { AgentPipelinePanel } from './components';
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -175,6 +184,13 @@ interface AppState {
   // Search
   showSearch: boolean;
   searchResults: SearchResult[];
+
+  // Knowledge Graph
+  showKnowledgeGraph: boolean;
+
+  // Agent Pipeline
+  showAgentPipeline: boolean;
+  showPipelineStats: boolean;
 }
 
 // ============================================================================
@@ -578,6 +594,13 @@ const ConversationalTUI: React.FC = () => {
     // Search
     showSearch: false,
     searchResults: [],
+
+    // Knowledge Graph
+    showKnowledgeGraph: false,
+
+    // Agent Pipeline
+    showAgentPipeline: false,
+    showPipelineStats: false,
   });
 
   const orchestratorRef = useRef<MultiAgentOrchestrator | null>(null);
@@ -596,6 +619,8 @@ const ConversationalTUI: React.FC = () => {
   const toolClientRef = useRef<StreamingClientWithTools | null>(null);
   const statusUpdateIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const searchEngineRef = useRef<ReturnType<typeof getSearchEngine> | null>(null);
+  const graphVisualizerRef = useRef<GraphVisualizer | null>(null);
+  const pipelineTrackerRef = useRef<AgentPipelineTracker | null>(null);
 
   // Initialize system
 useEffect(() => {
@@ -954,6 +979,18 @@ useEffect(() => {
       searchEngineRef.current = getSearchEngine(process.cwd());
       console.log('[Search] Search engine initialized');
 
+      // Initialize agent pipeline tracker
+      pipelineTrackerRef.current = getAgentPipelineTracker();
+      console.log('[Pipeline] Agent pipeline tracker initialized');
+
+      // Initialize knowledge graph visualizer lazily
+      // The visualizer will be created when the knowledge graph panel is shown
+      // For now, create a placeholder graph for demonstration
+      const kgTools = getKnowledgeGraphTools();
+      const demoGraph = new KnowledgeGraph('selek-project');
+      graphVisualizerRef.current = getGraphVisualizer(demoGraph);
+      console.log('[KnowledgeGraph] Graph visualizer initialized');
+
       if (mountedRef.current) {
         setState(prev => ({
           ...prev,
@@ -1056,6 +1093,9 @@ useEffect(() => {
 
 **Keyboard Shortcuts:**
 • Ctrl+F - Universal Search (files, agents, conversations, commands)
+• Ctrl+G - Knowledge Graph Visualization (entity relationships)
+• Ctrl+P - Agent Pipeline View (collaboration tracking)
+• Ctrl+Shift+P - Toggle Pipeline Statistics
 • Ctrl+U - Toggle Tool Usage Panel
 • Ctrl+Shift+U - Toggle Tool Statistics
 • Ctrl+S - Toggle Detailed Status Line
@@ -2305,6 +2345,33 @@ useEffect(() => {
       return;
     }
 
+    // Toggle knowledge graph (Ctrl+G)
+    if (key.ctrl && input === 'g') {
+      setState(prev => ({
+        ...prev,
+        showKnowledgeGraph: !prev.showKnowledgeGraph,
+      }));
+      return;
+    }
+
+    // Toggle agent pipeline (Ctrl+P)
+    if (key.ctrl && input === 'p') {
+      setState(prev => ({
+        ...prev,
+        showAgentPipeline: !prev.showAgentPipeline,
+      }));
+      return;
+    }
+
+    // Toggle pipeline stats (Ctrl+Shift+P)
+    if (key.ctrl && key.shift && input === 'P') {
+      setState(prev => ({
+        ...prev,
+        showPipelineStats: !prev.showPipelineStats,
+      }));
+      return;
+    }
+
     // Handle autocomplete suggestions
     if (state.showSuggestions && state.suggestions.length > 0) {
       if (key.upArrow) {
@@ -2572,6 +2639,25 @@ useEffect(() => {
             setState(prev => ({ ...prev, showSearch: false }));
           }}
           onSelect={handleSearchSelect}
+        />
+      )}
+
+      {/* Knowledge Graph Panel */}
+      {state.showKnowledgeGraph && graphVisualizerRef.current && (
+        <KnowledgeGraphPanel
+          visualizer={graphVisualizerRef.current}
+          onClose={() => {
+            setState(prev => ({ ...prev, showKnowledgeGraph: false }));
+          }}
+        />
+      )}
+
+      {/* Agent Pipeline Panel */}
+      {state.showAgentPipeline && pipelineTrackerRef.current && (
+        <AgentPipelinePanel
+          tracker={pipelineTrackerRef.current}
+          showStats={state.showPipelineStats}
+          maxDisplay={5}
         />
       )}
 
