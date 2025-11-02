@@ -19,3 +19,5 @@ export * from './ImagePasteIndicator';
 export * from './ClipboardPrompt';
 export * from './SearchResultItem';
 export * from './SearchModal';
+export * from './KnowledgeGraphPanel';
+export * from './AgentPipelinePanel';
